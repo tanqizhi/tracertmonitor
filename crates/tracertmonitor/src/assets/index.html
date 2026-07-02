@@ -9,9 +9,15 @@
 <body>
   <main class="cockpit">
     <header class="session-bar">
-      <section>
-        <span class="eyebrow">Target</span>
+      <section class="target-block">
+        <span class="eyebrow">TracertMonitor Cockpit</span>
         <h1 id="target">Loading...</h1>
+        <p class="session-copy">演示模式：浏览器端会持续推进样本，模拟真实链路监测刷新。</p>
+      </section>
+      <section class="status-strip" aria-label="session status">
+        <div><span>状态</span><strong id="live-state">实时监测中</strong></div>
+        <div><span>样本</span><strong id="sample-count">--</strong></div>
+        <div><span>刷新</span><strong id="refresh-at">--</strong></div>
       </section>
       <nav class="actions" aria-label="exports">
         <a href="/export/session.json">JSON</a>
@@ -22,7 +28,7 @@
       </nav>
     </header>
 
-    <aside class="summary-panel">
+    <aside class="summary-panel panel">
       <div class="panel-header compact">
         <h2>疑似问题路径</h2>
       </div>
@@ -33,7 +39,7 @@
       </div>
     </aside>
 
-    <section class="topology-panel">
+    <section class="topology-panel panel">
       <div class="panel-header">
         <h2>全路径拓扑</h2>
         <div class="zoom-controls">
@@ -45,16 +51,19 @@
       <div id="topology" class="topology-canvas"></div>
     </section>
 
-    <aside class="detail-panel">
+    <aside class="detail-panel panel">
       <div class="panel-header compact">
         <h2>路径详情</h2>
       </div>
       <div id="details"></div>
     </aside>
 
-    <section class="timeline-panel">
+    <section class="timeline-panel panel">
       <div class="panel-header timeline-header">
-        <h2>路径级监控</h2>
+        <div>
+          <h2>路径实时监控</h2>
+          <p>每条路径独立绘制 RTT 折线、丢包点和窗口命中概率。</p>
+        </div>
         <div class="window-controls">
           <select id="window-select" aria-label="time window">
             <option value="full">全会话</option>
@@ -67,7 +76,7 @@
         </div>
       </div>
       <div id="lanes" class="lanes"></div>
-      <div id="hover-readout" class="readout">移动到路径监控上查看精确数值</div>
+      <div id="hover-readout" class="readout">移动到路径折线图上查看当前时间点的精确数值</div>
     </section>
   </main>
   <script src="/assets/app.js"></script>

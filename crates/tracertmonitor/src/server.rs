@@ -130,6 +130,22 @@ mod tests {
     }
 
     #[test]
+    fn cockpit_assets_expose_realtime_monitoring_layout() {
+        let session = demo_session();
+        let index_response = response_for_path("/", &session).unwrap();
+        let app_response = response_for_path("/assets/app.js", &session).unwrap();
+        let styles_response = response_for_path("/assets/styles.css", &session).unwrap();
+        let index = String::from_utf8_lossy(&index_response.body);
+        let app = String::from_utf8_lossy(&app_response.body);
+        let styles = String::from_utf8_lossy(&styles_response.body);
+
+        assert!(index.contains("路径实时监控"));
+        assert!(app.contains("renderPathChart"));
+        assert!(app.contains("setInterval"));
+        assert!(styles.contains("100vw"));
+        assert!(styles.contains("100vh"));
+    }
+    #[test]
     fn route_exports_complete_csv_tables() {
         let session = demo_session();
 

@@ -1,5 +1,14 @@
+const LIVE_INTERVAL_MS = 2500;
+const MAX_LIVE_AGE_MS = 45 * 60 * 1000;
+const CHART_WIDTH = 520;
+const CHART_HEIGHT = 112;
+const CHART_PAD = { left: 28, right: 14, top: 12, bottom: 24 };
+
 const state = {
   session: null,
+  baseObservations: [],
+  liveObservations: [],
+  templatesByPath: new Map(),
   activePaths: [],
   selectedPathId: null,
   windowMode: "full",
@@ -10,15 +19,58 @@ const state = {
   panY: 0,
   dragging: false,
   dragStart: null,
+  liveCursor: 0,
+  liveTimer: null,
 };
 
 async function boot() {
   const response = await fetch("/api/session");
   state.session = await response.json();
-  state.activePaths = state.session.paths;
+  state.baseObservations = [...state.session.observations].sort(compareObservedAt);
+  state.liveObservations = state.baseObservations.map((observation) => ({ ...observation }));
+  state.templatesByPath = groupObservationsByPath(state.baseObservations);
   state.selectedPathId = state.session.paths[0]?.id ?? null;
   seedCustomWindowInputs();
   render();
+  startLiveLoop();
+}
+
+function startLiveLoop() {
+  if (state.liveTimer) clearInterval(state.liveTimer);
+  state.liveTimer = setInterval(() => {
+    appendLiveSamples();
+    render();
+  }, LIVE_INTERVAL_MS);
+}
+
+function appendLiveSamples() {
+  const now = new Date();
+  state.session.paths.forEach((path, pathIndex) => {
+    const templates = state.templatesByPath.get(path.id) ?? state.baseObservations;
+    if (!templates.length) return;
+    const template = templates[state.liveCursor % templates.length];
+    const wave = Math.sin((state.liveCursor + pathIndex) / 4) * 6;
+    const pressure = Math.cos((state.liveCursor + pathIndex * 3) / 7) * 3;
+    const rtt = template.rtt_ms === null
+      ? null
+      : Math.max(1, Number((template.rtt_ms + wave + pressure).toFixed(1)));
+    const jitter = template.jitter_ms === null
+      ? null
+      : Math.max(0, Number((template.jitter_ms + Math.abs(wave / 3)).toFixed(1)));
+
+    state.liveObservations.push({
+      ...template,
+      observed_at: new Date(now.getTime() + pathIndex * 180).toISOString(),
+      rtt_ms: rtt,
+      jitter_ms: jitter,
+    });
+  });
+
+  state.liveCursor += 1;
+  const cutoff = Date.now() - MAX_LIVE_AGE_MS;
+  state.liveObservations = state.liveObservations.filter(
+    (observation) => new Date(observation.observed_at).getTime() >= cutoff,
+  );
 }
 
 function render() {
@@ -28,6 +80,8 @@ function render() {
   }
   document.querySelector("#target").textContent =
     `${state.session.target.input} -> ${state.session.target.resolved.join(", ")}`;
+  document.querySelector("#sample-count").textContent = state.liveObservations.length.toString();
+  document.querySelector("#refresh-at").textContent = formatTime(latestObservationTime());
   renderSuspicions();
   renderEvents();
   renderTopology();
@@ -37,38 +91,59 @@ function render() {
 
 function pathsForActiveWindow() {
   const range = currentWindowRange();
-  const observations = state.session.observations.filter((observation) => {
+  const observations = state.liveObservations.filter((observation) => {
     const observedAt = new Date(observation.observed_at);
     return observedAt >= range.start && observedAt <= range.end;
   });
-  const byPath = new Map();
-  for (const observation of observations) {
-    if (!byPath.has(observation.path_id)) byPath.set(observation.path_id, []);
-    byPath.get(observation.path_id).push(observation);
-  }
+  const byPath = groupObservationsByPath(observations);
   const total = Math.max(1, observations.length);
-  return state.session.paths
-    .filter((path) => byPath.has(path.id))
-    .map((path) => {
-      const hits = byPath.get(path.id);
-      const lost = hits.filter((hit) => hit.lost).length;
-      return {
-        ...path,
-        metrics: {
-          ...path.metrics,
-          hit_count: hits.length,
-          sample_count: hits.length,
-          window_share_pct: hits.length / total * 100,
-          loss_pct: lost / Math.max(1, hits.length) * 100,
-          avg_rtt_ms: average(hits.map((hit) => hit.rtt_ms).filter((value) => value !== null)),
-          avg_jitter_ms: average(hits.map((hit) => hit.jitter_ms).filter((value) => value !== null)),
-        },
-      };
-    });
+
+  return state.session.paths.map((path) => {
+    const hits = byPath.get(path.id) ?? [];
+    const metrics = metricsForHits(path, hits, total);
+    return {
+      ...path,
+      metrics,
+      suspicion: deriveSuspicion(path, metrics),
+      live_samples: hits,
+    };
+  });
+}
+
+function metricsForHits(path, hits, total) {
+  const lost = hits.filter((hit) => hit.lost).length;
+  const rtts = hits.map((hit) => hit.rtt_ms).filter((value) => value !== null);
+  const jitters = hits.map((hit) => hit.jitter_ms).filter((value) => value !== null);
+  return {
+    ...path.metrics,
+    hit_count: hits.length,
+    sample_count: hits.length,
+    window_share_pct: hits.length / total * 100,
+    loss_pct: lost / Math.max(1, hits.length) * 100,
+    avg_rtt_ms: average(rtts),
+    avg_jitter_ms: average(jitters),
+  };
+}
+
+function deriveSuspicion(path, metrics) {
+  if (metrics.loss_pct >= 12) {
+    return {
+      severity: "critical",
+      reason: `当前窗口丢包率 ${metrics.loss_pct.toFixed(1)}%，优先排查该路径`,
+    };
+  }
+  if (metrics.avg_rtt_ms >= 95) {
+    return {
+      severity: "warning",
+      reason: `当前窗口平均 RTT ${metrics.avg_rtt_ms.toFixed(1)}ms，存在高延迟迹象`,
+    };
+  }
+  return path.suspicion && metrics.hit_count > 0 ? path.suspicion : null;
 }
 
 function currentWindowRange() {
-  const times = state.session.observations.map((observation) => new Date(observation.observed_at));
+  const observations = state.liveObservations.length ? state.liveObservations : state.baseObservations;
+  const times = observations.map((observation) => new Date(observation.observed_at).getTime());
   const first = new Date(Math.min(...times));
   const last = new Date(Math.max(...times));
   if (state.windowMode === "1m") return { start: new Date(last.getTime() - 60_000), end: last };
@@ -79,9 +154,32 @@ function currentWindowRange() {
   return { start: first, end: last };
 }
 
+function latestObservationTime() {
+  const observations = state.liveObservations.length ? state.liveObservations : state.baseObservations;
+  const latest = observations.reduce((max, observation) => {
+    const time = new Date(observation.observed_at).getTime();
+    return Math.max(max, time);
+  }, 0);
+  return latest ? new Date(latest).toISOString() : new Date().toISOString();
+}
+
 function average(values) {
   if (!values.length) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function groupObservationsByPath(observations) {
+  const byPath = new Map();
+  for (const observation of observations) {
+    if (!byPath.has(observation.path_id)) byPath.set(observation.path_id, []);
+    byPath.get(observation.path_id).push(observation);
+  }
+  for (const hits of byPath.values()) hits.sort(compareObservedAt);
+  return byPath;
+}
+
+function compareObservedAt(left, right) {
+  return new Date(left.observed_at) - new Date(right.observed_at);
 }
 
 function renderSuspicions() {
@@ -148,7 +246,7 @@ function renderTopology() {
 
 function drawPath(svg, path, pathIndex) {
   const selected = path.id === state.selectedPathId;
-  const y = 72 + pathIndex * 112;
+  const y = 64 + pathIndex * 100;
   const points = path.hops.map((hop, index) => ({ x: 118 + index * 190, y, hop }));
   for (let i = 0; i < points.length - 1; i += 1) {
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -227,30 +325,195 @@ function renderLanes() {
   const root = document.querySelector("#lanes");
   root.innerHTML = "";
   for (const path of state.activePaths) {
-    const lane = document.createElement("button");
-    lane.type = "button";
-    lane.className = path.id === state.selectedPathId ? "lane selected" : "lane";
-    lane.innerHTML = `
-      <strong>${path.label}</strong>
-      <span>Share ${path.metrics.window_share_pct.toFixed(1)}%</span>
-      <span>RTT ${path.metrics.avg_rtt_ms.toFixed(1)}ms</span>
-      <span>Loss ${path.metrics.loss_pct.toFixed(1)}%</span>
-      <span>Jitter ${path.metrics.avg_jitter_ms.toFixed(1)}ms</span>
-    `;
-    lane.addEventListener("click", () => {
+    const samples = observationsForPath(path);
+    const card = document.createElement("article");
+    card.className = path.id === state.selectedPathId ? "lane-card selected" : "lane-card";
+    card.tabIndex = 0;
+    card.addEventListener("click", () => {
       state.selectedPathId = path.id;
       render();
     });
-    lane.addEventListener("mousemove", () => {
-      document.querySelector("#hover-readout").textContent =
-        `${path.label} | RTT ${path.metrics.avg_rtt_ms.toFixed(1)}ms | Loss ${path.metrics.loss_pct.toFixed(1)}% | Jitter ${path.metrics.avg_jitter_ms.toFixed(1)}ms | Share ${path.metrics.window_share_pct.toFixed(1)}% | Hits ${path.metrics.hit_count}`;
-    });
-    root.appendChild(lane);
+
+    const top = document.createElement("div");
+    top.className = "lane-top";
+    top.innerHTML = `
+      <div class="lane-title">
+        <strong>${path.label}</strong>
+        <span>${samples.length} samples in current window</span>
+      </div>
+      <span class="${healthClass(path)}">${healthText(path)}</span>
+    `;
+    card.appendChild(top);
+
+    const metrics = document.createElement("div");
+    metrics.className = "metrics";
+    metrics.innerHTML = `
+      <div class="metric"><span>Share</span><strong>${path.metrics.window_share_pct.toFixed(1)}%</strong></div>
+      <div class="metric"><span>RTT</span><strong>${path.metrics.avg_rtt_ms.toFixed(1)}ms</strong></div>
+      <div class="metric"><span>Loss</span><strong>${path.metrics.loss_pct.toFixed(1)}%</strong></div>
+      <div class="metric"><span>Jitter</span><strong>${path.metrics.avg_jitter_ms.toFixed(1)}ms</strong></div>
+    `;
+    card.appendChild(metrics);
+
+    const shell = document.createElement("div");
+    shell.className = "chart-shell";
+    shell.appendChild(renderPathChart(path, samples));
+    card.appendChild(shell);
+
+    const caption = document.createElement("div");
+    caption.className = "chart-caption";
+    caption.innerHTML = `<span>${formatWindowStart(samples)}</span><span>${formatWindowEnd(samples)}</span>`;
+    card.appendChild(caption);
+
+    root.appendChild(card);
   }
 }
 
+function renderPathChart(path, samples) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`);
+  svg.classList.add("path-chart");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${path.label} RTT realtime chart`);
+
+  drawChartGrid(svg);
+  if (!samples.length) {
+    const empty = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    empty.setAttribute("x", CHART_WIDTH / 2);
+    empty.setAttribute("y", CHART_HEIGHT / 2);
+    empty.setAttribute("text-anchor", "middle");
+    empty.setAttribute("fill", "#617066");
+    empty.textContent = "当前窗口暂无样本";
+    svg.appendChild(empty);
+    return svg;
+  }
+
+  const maxRtt = Math.max(20, ...samples.map((sample) => sample.rtt_ms ?? 0)) * 1.15;
+  const points = samples.map((sample, index) => ({
+    sample,
+    x: scaleX(index, samples.length),
+    y: sample.rtt_ms === null ? null : scaleY(sample.rtt_ms, maxRtt),
+  }));
+
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  line.setAttribute("class", "chart-line");
+  line.setAttribute("d", linePath(points));
+  svg.appendChild(line);
+
+  for (const point of points) {
+    if (point.sample.lost) {
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("class", "loss-dot");
+      dot.setAttribute("cx", point.x);
+      dot.setAttribute("cy", CHART_PAD.top + 6);
+      dot.setAttribute("r", 4.5);
+      svg.appendChild(dot);
+    } else if (point.y !== null && points.length <= 90) {
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("class", "sample-dot");
+      dot.setAttribute("cx", point.x);
+      dot.setAttribute("cy", point.y);
+      dot.setAttribute("r", 2.8);
+      svg.appendChild(dot);
+    }
+  }
+
+  svg.addEventListener("mousemove", (event) => {
+    const rect = svg.getBoundingClientRect();
+    const ratio = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+    const index = clamp(Math.round(ratio * (samples.length - 1)), 0, samples.length - 1);
+    const sample = samples[index];
+    document.querySelector("#hover-readout").textContent = readoutForSample(path, sample, index + 1, samples.length);
+  });
+  svg.addEventListener("mouseleave", () => {
+    document.querySelector("#hover-readout").textContent = "移动到路径折线图上查看当前时间点的精确数值";
+  });
+
+  return svg;
+}
+
+function drawChartGrid(svg) {
+  for (let i = 0; i < 4; i += 1) {
+    const y = CHART_PAD.top + i * ((CHART_HEIGHT - CHART_PAD.top - CHART_PAD.bottom) / 3);
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("class", "chart-grid");
+    line.setAttribute("x1", CHART_PAD.left);
+    line.setAttribute("x2", CHART_WIDTH - CHART_PAD.right);
+    line.setAttribute("y1", y);
+    line.setAttribute("y2", y);
+    svg.appendChild(line);
+  }
+}
+
+function linePath(points) {
+  let d = "";
+  let drawing = false;
+  for (const point of points) {
+    if (point.y === null || point.sample.lost) {
+      drawing = false;
+      continue;
+    }
+    d += `${drawing ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)} `;
+    drawing = true;
+  }
+  return d.trim();
+}
+
+function scaleX(index, count) {
+  if (count <= 1) return CHART_PAD.left;
+  const width = CHART_WIDTH - CHART_PAD.left - CHART_PAD.right;
+  return CHART_PAD.left + index / (count - 1) * width;
+}
+
+function scaleY(value, maxRtt) {
+  const height = CHART_HEIGHT - CHART_PAD.top - CHART_PAD.bottom;
+  return CHART_PAD.top + (1 - value / maxRtt) * height;
+}
+
+function observationsForPath(path) {
+  const range = currentWindowRange();
+  return state.liveObservations
+    .filter((observation) => observation.path_id === path.id)
+    .filter((observation) => {
+      const observedAt = new Date(observation.observed_at);
+      return observedAt >= range.start && observedAt <= range.end;
+    })
+    .sort(compareObservedAt)
+    .slice(-120);
+}
+
+function readoutForSample(path, sample, index, total) {
+  const rtt = sample.rtt_ms === null ? "lost" : `${sample.rtt_ms.toFixed(1)}ms`;
+  const jitter = sample.jitter_ms === null ? "--" : `${sample.jitter_ms.toFixed(1)}ms`;
+  return `${path.label} | ${index}/${total} | ${formatTime(sample.observed_at)} | RTT ${rtt} | Loss ${sample.lost ? "yes" : "no"} | Jitter ${jitter} | Share ${path.metrics.window_share_pct.toFixed(1)}%`;
+}
+
+function healthText(path) {
+  if (path.metrics.loss_pct >= 12) return "严重丢包";
+  if (path.metrics.avg_rtt_ms >= 95) return "高延迟";
+  if (path.suspicion) return "需关注";
+  return "稳定";
+}
+
+function healthClass(path) {
+  if (path.metrics.loss_pct >= 12) return "health-pill bad";
+  if (path.metrics.avg_rtt_ms >= 95 || path.suspicion) return "health-pill warn";
+  return "health-pill";
+}
+
+function formatWindowStart(samples) {
+  if (!samples.length) return "--";
+  return formatTime(samples[0].observed_at);
+}
+
+function formatWindowEnd(samples) {
+  if (!samples.length) return "--";
+  return formatTime(samples[samples.length - 1].observed_at);
+}
+
 function seedCustomWindowInputs() {
-  const times = state.session.observations.map((observation) => new Date(observation.observed_at));
+  const observations = state.liveObservations.length ? state.liveObservations : state.baseObservations;
+  const times = observations.map((observation) => new Date(observation.observed_at).getTime());
   const first = new Date(Math.min(...times));
   const last = new Date(Math.max(...times));
   state.customStart = toLocalInput(first);
