@@ -1,1 +1,149 @@
+use crate::export::{export_csv_bundle, export_json};
+use crate::model::TraceSession;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use thiserror::Error;
 
+const INDEX_HTML: &str = include_str!("assets/index.html");
+const APP_JS: &str = include_str!("assets/app.js");
+const STYLES_CSS: &str = include_str!("assets/styles.css");
+
+#[derive(Debug, Error)]
+pub enum ServerError {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("json export error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("csv export error: {0}")]
+    Csv(#[from] csv::Error),
+}
+
+pub struct CockpitServer {
+    listener: TcpListener,
+    session: TraceSession,
+}
+
+impl CockpitServer {
+    pub fn bind(addr: impl ToSocketAddrs, session: TraceSession) -> Result<Self, ServerError> {
+        Ok(Self {
+            listener: TcpListener::bind(addr)?,
+            session,
+        })
+    }
+
+    pub fn local_addr(&self) -> Result<SocketAddr, ServerError> {
+        Ok(self.listener.local_addr()?)
+    }
+
+    pub fn run(self) -> Result<(), ServerError> {
+        for stream in self.listener.incoming() {
+            handle_stream(stream?, &self.session)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct RouteResponse {
+    pub status: u16,
+    pub content_type: &'static str,
+    pub body: Vec<u8>,
+}
+
+pub fn response_for_path(path: &str, session: &TraceSession) -> Result<RouteResponse, ServerError> {
+    match path {
+        "/" | "/index.html" => Ok(text_response(200, "text/html; charset=utf-8", INDEX_HTML)),
+        "/assets/app.js" => Ok(text_response(200, "text/javascript; charset=utf-8", APP_JS)),
+        "/assets/styles.css" => Ok(text_response(200, "text/css; charset=utf-8", STYLES_CSS)),
+        "/api/session" | "/export/session.json" => Ok(text_response(
+            200,
+            "application/json; charset=utf-8",
+            &export_json(session)?,
+        )),
+        "/export/path-summary.csv" => Ok(text_response(
+            200,
+            "text/csv; charset=utf-8",
+            &export_csv_bundle(session)?.path_summary,
+        )),
+        "/export/hop-summary.csv" => Ok(text_response(
+            200,
+            "text/csv; charset=utf-8",
+            &export_csv_bundle(session)?.hop_summary,
+        )),
+        "/export/observations.csv" => Ok(text_response(
+            200,
+            "text/csv; charset=utf-8",
+            &export_csv_bundle(session)?.observations,
+        )),
+        "/export/events.csv" => Ok(text_response(
+            200,
+            "text/csv; charset=utf-8",
+            &export_csv_bundle(session)?.events,
+        )),
+        _ => Ok(text_response(404, "text/plain; charset=utf-8", "not found")),
+    }
+}
+
+fn handle_stream(mut stream: TcpStream, session: &TraceSession) -> Result<(), ServerError> {
+    let mut buffer = [0_u8; 2048];
+    let read = stream.read(&mut buffer)?;
+    let request = String::from_utf8_lossy(&buffer[..read]);
+    let path = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or("/");
+    let response = response_for_path(path, session)?;
+    let status_text = if response.status == 200 { "OK" } else { "Not Found" };
+    let header = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        response.status,
+        status_text,
+        response.content_type,
+        response.body.len()
+    );
+    stream.write_all(header.as_bytes())?;
+    stream.write_all(&response.body)?;
+    Ok(())
+}
+
+fn text_response(status: u16, content_type: &'static str, body: &str) -> RouteResponse {
+    RouteResponse {
+        status,
+        content_type,
+        body: body.as_bytes().to_vec(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::demo::demo_session;
+
+    #[test]
+    fn route_index_returns_html() {
+        let response = response_for_path("/", &demo_session()).unwrap();
+
+        assert_eq!(200, response.status);
+        assert_eq!("text/html; charset=utf-8", response.content_type);
+        assert!(String::from_utf8_lossy(&response.body).contains("TracertMonitor"));
+    }
+
+    #[test]
+    fn route_exports_complete_csv_tables() {
+        let session = demo_session();
+
+        assert!(String::from_utf8_lossy(
+            &response_for_path("/export/hop-summary.csv", &session)
+                .unwrap()
+                .body
+        )
+        .contains("NodeKind"));
+        assert!(String::from_utf8_lossy(
+            &response_for_path("/export/observations.csv", &session)
+                .unwrap()
+                .body
+        )
+        .contains("ObservedAt"));
+    }
+}
