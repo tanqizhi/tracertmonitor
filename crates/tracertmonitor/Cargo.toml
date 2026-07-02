@@ -1,0 +1,24 @@
+[package]
+name = "tracertmonitor"
+description = "A portable network diagnostics cockpit"
+version.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+readme.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+chrono = { workspace = true, default-features = false, features = ["clock", "serde"] }
+csv.workspace = true
+serde = { workspace = true, default-features = false, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror.workspace = true
+trippy-core.workspace = true
+
+[lints]
+workspace = true
