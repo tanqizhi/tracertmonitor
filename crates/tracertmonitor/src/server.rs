@@ -142,6 +142,14 @@ mod tests {
         assert!(index.contains("路径实时监控"));
         assert!(app.contains("renderPathChart"));
         assert!(app.contains("setInterval"));
+        assert!(app.contains("chart-axis"));
+        assert!(app.contains("axis-label"));
+        assert!(app.contains("chart-tooltip"));
+        assert!(app.contains("hover-target"));
+        assert!(app.contains("showChartTooltip"));
+        assert!(styles.contains(".chart-tooltip"));
+        assert!(styles.contains(".axis-label"));
+        assert!(styles.contains(".hover-target"));
         assert!(css_rule(&styles, "body").contains("overflow-y: auto"));
         assert!(!css_rule(&styles, "body").contains("overflow: hidden"));
         assert!(css_rule(&styles, ".cockpit").contains("height: auto"));

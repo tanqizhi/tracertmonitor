@@ -1,8 +1,8 @@
 const LIVE_INTERVAL_MS = 2500;
 const MAX_LIVE_AGE_MS = 45 * 60 * 1000;
 const CHART_WIDTH = 520;
-const CHART_HEIGHT = 112;
-const CHART_PAD = { left: 28, right: 14, top: 12, bottom: 24 };
+const CHART_HEIGHT = 168;
+const CHART_PAD = { left: 56, right: 24, top: 22, bottom: 42 };
 
 const state = {
   session: null,
@@ -376,8 +376,8 @@ function renderPathChart(path, samples) {
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", `${path.label} RTT realtime chart`);
 
-  drawChartGrid(svg);
   if (!samples.length) {
+    drawChartGrid(svg, 100, samples);
     const empty = document.createElementNS("http://www.w3.org/2000/svg", "text");
     empty.setAttribute("x", CHART_WIDTH / 2);
     empty.setAttribute("y", CHART_HEIGHT / 2);
@@ -388,12 +388,21 @@ function renderPathChart(path, samples) {
     return svg;
   }
 
-  const maxRtt = Math.max(20, ...samples.map((sample) => sample.rtt_ms ?? 0)) * 1.15;
+  const maxRtt = Math.max(20, ...samples.map((sample) => sample.rtt_ms ?? 0)) * 1.18;
   const points = samples.map((sample, index) => ({
     sample,
     x: scaleX(index, samples.length),
     y: sample.rtt_ms === null ? null : scaleY(sample.rtt_ms, maxRtt),
   }));
+
+  createChartDefs(svg, path.id);
+  drawChartGrid(svg, maxRtt, samples);
+
+  const fill = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  fill.setAttribute("class", "chart-fill");
+  fill.setAttribute("d", areaPath(points));
+  fill.setAttribute("fill", `url(#${chartGradientId(path.id)})`);
+  svg.appendChild(fill);
 
   const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
   line.setAttribute("class", "chart-line");
@@ -401,50 +410,246 @@ function renderPathChart(path, samples) {
   svg.appendChild(line);
 
   for (const point of points) {
+    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     if (point.sample.lost) {
-      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       dot.setAttribute("class", "loss-dot");
       dot.setAttribute("cx", point.x);
-      dot.setAttribute("cy", CHART_PAD.top + 6);
-      dot.setAttribute("r", 4.5);
-      svg.appendChild(dot);
-    } else if (point.y !== null && points.length <= 90) {
-      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      dot.setAttribute("class", "sample-dot");
+      dot.setAttribute("cy", CHART_PAD.top + 9);
+      dot.setAttribute("r", 4.8);
+    } else if (point.y !== null) {
+      const elevated = point.sample.rtt_ms >= 95 ? " elevated" : "";
+      dot.setAttribute("class", `sample-dot${elevated}`);
       dot.setAttribute("cx", point.x);
       dot.setAttribute("cy", point.y);
-      dot.setAttribute("r", 2.8);
-      svg.appendChild(dot);
+      dot.setAttribute("r", points.length <= 90 ? 3.2 : 2.4);
     }
+    if (dot.getAttribute("class")) svg.appendChild(dot);
   }
 
-  svg.addEventListener("mousemove", (event) => {
-    const rect = svg.getBoundingClientRect();
-    const ratio = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
-    const index = clamp(Math.round(ratio * (samples.length - 1)), 0, samples.length - 1);
-    const sample = samples[index];
-    document.querySelector("#hover-readout").textContent = readoutForSample(path, sample, index + 1, samples.length);
+  const highlight = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  highlight.setAttribute("class", "highlight-dot is-hidden");
+  highlight.setAttribute("r", 6.5);
+  svg.appendChild(highlight);
+
+  const tooltip = createChartTooltip();
+  svg.appendChild(tooltip);
+
+  points.forEach((point, index) => {
+    const target = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    target.setAttribute("class", "hover-target");
+    target.setAttribute("cx", point.x);
+    target.setAttribute("cy", point.sample.lost ? CHART_PAD.top + 9 : point.y ?? CHART_PAD.top);
+    target.setAttribute("r", 10);
+    target.addEventListener("mouseenter", () => showChartTooltip(tooltip, highlight, path, point, index, points.length));
+    target.addEventListener("mousemove", () => showChartTooltip(tooltip, highlight, path, point, index, points.length));
+    target.addEventListener("mouseleave", () => hideChartTooltip(tooltip, highlight));
+    svg.appendChild(target);
   });
-  svg.addEventListener("mouseleave", () => {
-    document.querySelector("#hover-readout").textContent = "移动到路径折线图上查看当前时间点的精确数值";
-  });
+
+  svg.addEventListener("mouseleave", () => hideChartTooltip(tooltip, highlight));
 
   return svg;
 }
 
-function drawChartGrid(svg) {
-  for (let i = 0; i < 4; i += 1) {
-    const y = CHART_PAD.top + i * ((CHART_HEIGHT - CHART_PAD.top - CHART_PAD.bottom) / 3);
+function createChartDefs(svg, pathId) {
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const gradient = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+  gradient.setAttribute("id", chartGradientId(pathId));
+  gradient.setAttribute("x1", "0");
+  gradient.setAttribute("x2", "0");
+  gradient.setAttribute("y1", "0");
+  gradient.setAttribute("y2", "1");
+
+  const top = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+  top.setAttribute("offset", "0%");
+  top.setAttribute("stop-color", "#235c8f");
+  top.setAttribute("stop-opacity", "0.22");
+  gradient.appendChild(top);
+
+  const bottom = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+  bottom.setAttribute("offset", "100%");
+  bottom.setAttribute("stop-color", "#235c8f");
+  bottom.setAttribute("stop-opacity", "0.02");
+  gradient.appendChild(bottom);
+
+  defs.appendChild(gradient);
+  svg.appendChild(defs);
+}
+
+function chartGradientId(pathId) {
+  return `chart-gradient-${pathId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function drawChartGrid(svg, maxRtt, samples) {
+  const plotBottom = CHART_HEIGHT - CHART_PAD.bottom;
+  const plotRight = CHART_WIDTH - CHART_PAD.right;
+  const yTicks = [0, maxRtt / 2, maxRtt];
+
+  for (const tick of yTicks) {
+    const y = scaleY(tick, maxRtt);
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
     line.setAttribute("class", "chart-grid");
     line.setAttribute("x1", CHART_PAD.left);
-    line.setAttribute("x2", CHART_WIDTH - CHART_PAD.right);
+    line.setAttribute("x2", plotRight);
     line.setAttribute("y1", y);
     line.setAttribute("y2", y);
     svg.appendChild(line);
+
+    drawAxisLabel(svg, `${Math.round(tick)}ms`, CHART_PAD.left - 9, y + 4, "end");
+  }
+
+  drawAxisLine(svg, CHART_PAD.left, CHART_PAD.top, CHART_PAD.left, plotBottom);
+  drawAxisLine(svg, CHART_PAD.left, plotBottom, plotRight, plotBottom);
+  drawAxisTitle(svg, "RTT(ms)", 12, CHART_PAD.top + 8, "start");
+
+  const xTicks = axisSampleIndexes(samples.length);
+  for (const index of xTicks) {
+    const x = scaleX(index, Math.max(1, samples.length));
+    const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tick.setAttribute("class", "chart-axis tick");
+    tick.setAttribute("x1", x);
+    tick.setAttribute("x2", x);
+    tick.setAttribute("y1", plotBottom);
+    tick.setAttribute("y2", plotBottom + 5);
+    svg.appendChild(tick);
+
+    const sample = samples[index];
+    const anchor = index === 0 ? "start" : index === samples.length - 1 ? "end" : "middle";
+    drawAxisLabel(svg, sample ? formatAxisTime(sample.observed_at) : "--", x, plotBottom + 20, anchor);
   }
 }
 
+function drawAxisLine(svg, x1, y1, x2, y2) {
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  line.setAttribute("class", "chart-axis");
+  line.setAttribute("x1", x1);
+  line.setAttribute("x2", x2);
+  line.setAttribute("y1", y1);
+  line.setAttribute("y2", y2);
+  svg.appendChild(line);
+}
+
+function drawAxisLabel(svg, text, x, y, anchor) {
+  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  label.setAttribute("class", "axis-label");
+  label.setAttribute("x", x);
+  label.setAttribute("y", y);
+  label.setAttribute("text-anchor", anchor);
+  label.textContent = text;
+  svg.appendChild(label);
+}
+
+function drawAxisTitle(svg, text, x, y, anchor) {
+  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  label.setAttribute("class", "axis-title");
+  label.setAttribute("x", x);
+  label.setAttribute("y", y);
+  label.setAttribute("text-anchor", anchor);
+  label.textContent = text;
+  svg.appendChild(label);
+}
+
+function axisSampleIndexes(count) {
+  if (count <= 0) return [0];
+  if (count === 1) return [0];
+  return [...new Set([0, Math.floor((count - 1) / 2), count - 1])];
+}
+
+function createChartTooltip() {
+  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.setAttribute("class", "chart-tooltip is-hidden");
+
+  const bubble = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  bubble.setAttribute("class", "tooltip-bubble");
+  bubble.setAttribute("d", "M8 0H168Q176 0 176 8V78Q176 86 168 86H96L86 98L76 86H8Q0 86 0 78V8Q0 0 8 0Z");
+  group.appendChild(bubble);
+
+  const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  title.setAttribute("class", "tooltip-title");
+  title.setAttribute("x", 12);
+  title.setAttribute("y", 18);
+  group.appendChild(title);
+
+  for (let i = 0; i < 4; i += 1) {
+    const row = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    row.setAttribute("class", "tooltip-row");
+    row.setAttribute("data-row", i.toString());
+    row.setAttribute("x", 12);
+    row.setAttribute("y", 37 + i * 14);
+    group.appendChild(row);
+  }
+
+  return group;
+}
+
+function showChartTooltip(tooltip, highlight, path, point, index, total) {
+  const y = point.sample.lost ? CHART_PAD.top + 9 : point.y ?? CHART_PAD.top;
+  const x = point.x;
+  const tooltipX = clamp(x + 14, CHART_PAD.left, CHART_WIDTH - 186);
+  const tooltipY = clamp(y - 78, 8, CHART_HEIGHT - 110);
+  const rows = tooltipRows(path, point.sample, index + 1, total);
+
+  tooltip.querySelector(".tooltip-title").textContent = `${path.label} #${index + 1}`;
+  rows.forEach((row, rowIndex) => {
+    tooltip.querySelector(`[data-row="${rowIndex}"]`).textContent = row;
+  });
+  tooltip.setAttribute("transform", `translate(${tooltipX.toFixed(1)} ${tooltipY.toFixed(1)})`);
+  tooltip.classList.remove("is-hidden");
+
+  highlight.setAttribute("cx", x);
+  highlight.setAttribute("cy", y);
+  highlight.classList.remove("is-hidden");
+  document.querySelector("#hover-readout").textContent = readoutForSample(path, point.sample, index + 1, total);
+}
+
+function hideChartTooltip(tooltip, highlight) {
+  tooltip.classList.add("is-hidden");
+  highlight.classList.add("is-hidden");
+  document.querySelector("#hover-readout").textContent = "移动到路径折线图上查看当前时间点的精确数值";
+}
+
+function tooltipRows(path, sample, index, total) {
+  const rtt = sample.rtt_ms === null ? "lost" : `${sample.rtt_ms.toFixed(1)}ms`;
+  const jitter = sample.jitter_ms === null ? "--" : `${sample.jitter_ms.toFixed(1)}ms`;
+  return [
+    `${formatTime(sample.observed_at)} | ${index}/${total}`,
+    `RTT ${rtt} | Jitter ${jitter}`,
+    `Loss ${sample.lost ? "yes" : "no"} | Share ${path.metrics.window_share_pct.toFixed(1)}%`,
+    `状态 ${sampleStatus(sample)}`,
+  ];
+}
+
+function sampleStatus(sample) {
+  if (sample.lost) return "丢包";
+  if (sample.rtt_ms >= 95) return "高延迟";
+  return "正常";
+}
+
+function formatAxisTime(value) {
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function areaPath(points) {
+  const bottom = CHART_HEIGHT - CHART_PAD.bottom;
+  const segments = [];
+  let current = [];
+  for (const point of points) {
+    if (point.y === null || point.sample.lost) {
+      if (current.length) segments.push(current);
+      current = [];
+      continue;
+    }
+    current.push(point);
+  }
+  if (current.length) segments.push(current);
+
+  return segments.map((segment) => {
+    const first = segment[0];
+    const last = segment[segment.length - 1];
+    const top = segment.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+    return `${top} L${last.x.toFixed(1)},${bottom} L${first.x.toFixed(1)},${bottom} Z`;
+  }).join(" ");
+}
 function linePath(points) {
   let d = "";
   let drawing = false;

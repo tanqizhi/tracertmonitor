@@ -319,7 +319,7 @@ h2 {
 
 .lane-card {
   min-width: 0;
-  min-height: 214px;
+  min-height: 282px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: linear-gradient(180deg, #ffffff, #f8faf6);
@@ -388,12 +388,14 @@ h2 {
 }
 
 .chart-shell {
-  height: 112px;
-  border: 1px solid var(--line-soft);
-  border-radius: 12px;
+  height: 168px;
+  border: 1px solid rgba(35, 92, 143, 0.18);
+  border-radius: 14px;
   background:
-    linear-gradient(180deg, rgba(35, 92, 143, 0.08), transparent 45%),
+    radial-gradient(circle at 12% 18%, rgba(47, 143, 91, 0.12), transparent 24%),
+    linear-gradient(180deg, rgba(35, 92, 143, 0.10), transparent 50%),
     #fcfdfb;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
   overflow: hidden;
 }
 
@@ -404,8 +406,33 @@ h2 {
 }
 
 .chart-grid {
-  stroke: var(--line-soft);
+  stroke: rgba(97, 112, 102, 0.22);
   stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+
+.chart-axis {
+  stroke: rgba(19, 32, 25, 0.48);
+  stroke-width: 1.15;
+  shape-rendering: crispEdges;
+}
+
+.chart-axis.tick {
+  stroke: rgba(19, 32, 25, 0.38);
+}
+
+.axis-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.axis-title {
+  fill: var(--ink);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  opacity: 0.68;
 }
 
 .chart-line {
@@ -413,17 +440,19 @@ h2 {
   stroke: var(--accent);
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 2.6;
+  stroke-width: 3;
+  filter: drop-shadow(0 3px 5px rgba(35, 92, 143, 0.18));
 }
 
 .chart-fill {
-  fill: rgba(35, 92, 143, 0.08);
+  opacity: 1;
 }
 
 .loss-dot {
   fill: var(--bad);
   stroke: #ffffff;
-  stroke-width: 2;
+  stroke-width: 2.2;
+  filter: drop-shadow(0 2px 5px rgba(186, 60, 50, 0.32));
 }
 
 .sample-dot {
@@ -432,6 +461,55 @@ h2 {
   stroke-width: 1.8;
 }
 
+.sample-dot.elevated {
+  fill: #fff4df;
+  stroke: var(--warn);
+  stroke-width: 2.2;
+}
+
+.highlight-dot {
+  fill: #ffffff;
+  stroke: var(--accent);
+  stroke-width: 3;
+  filter: drop-shadow(0 3px 8px rgba(35, 92, 143, 0.38));
+  pointer-events: none;
+}
+
+.hover-target {
+  fill: transparent;
+  stroke: transparent;
+  cursor: crosshair;
+  pointer-events: all;
+}
+
+.chart-tooltip {
+  pointer-events: none;
+  filter: drop-shadow(0 14px 24px rgba(19, 32, 25, 0.24));
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.chart-tooltip.is-hidden,
+.highlight-dot.is-hidden {
+  opacity: 0;
+}
+
+.tooltip-bubble {
+  fill: rgba(19, 32, 25, 0.94);
+  stroke: rgba(255, 255, 255, 0.18);
+  stroke-width: 1;
+}
+
+.tooltip-title {
+  fill: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tooltip-row {
+  fill: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 .chart-caption {
   display: flex;
   justify-content: space-between;
