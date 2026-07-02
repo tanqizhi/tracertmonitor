@@ -2,11 +2,74 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TracertMonitor</title>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
-  <main id="app">TracertMonitor</main>
+  <main class="cockpit">
+    <header class="session-bar">
+      <section>
+        <span class="eyebrow">Target</span>
+        <h1 id="target">Loading...</h1>
+      </section>
+      <nav class="actions" aria-label="exports">
+        <a href="/export/session.json">JSON</a>
+        <a href="/export/path-summary.csv">Path CSV</a>
+        <a href="/export/hop-summary.csv">Hop CSV</a>
+        <a href="/export/observations.csv">Observation CSV</a>
+        <a href="/export/events.csv">Events CSV</a>
+      </nav>
+    </header>
+
+    <aside class="summary-panel">
+      <div class="panel-header compact">
+        <h2>疑似问题路径</h2>
+      </div>
+      <div id="suspicions" class="stack"></div>
+      <div class="event-block">
+        <h2>事件</h2>
+        <div id="events" class="stack"></div>
+      </div>
+    </aside>
+
+    <section class="topology-panel">
+      <div class="panel-header">
+        <h2>全路径拓扑</h2>
+        <div class="zoom-controls">
+          <button id="zoom-in" type="button" title="放大">+</button>
+          <button id="zoom-out" type="button" title="缩小">-</button>
+          <button id="zoom-reset" type="button" title="重置视角">Reset</button>
+        </div>
+      </div>
+      <div id="topology" class="topology-canvas"></div>
+    </section>
+
+    <aside class="detail-panel">
+      <div class="panel-header compact">
+        <h2>路径详情</h2>
+      </div>
+      <div id="details"></div>
+    </aside>
+
+    <section class="timeline-panel">
+      <div class="panel-header timeline-header">
+        <h2>路径级监控</h2>
+        <div class="window-controls">
+          <select id="window-select" aria-label="time window">
+            <option value="full">全会话</option>
+            <option value="5m">最近 5 分钟</option>
+            <option value="1m">最近 1 分钟</option>
+            <option value="custom">自定义</option>
+          </select>
+          <input id="window-start" type="datetime-local" hidden aria-label="start time">
+          <input id="window-end" type="datetime-local" hidden aria-label="end time">
+        </div>
+      </div>
+      <div id="lanes" class="lanes"></div>
+      <div id="hover-readout" class="readout">移动到路径监控上查看精确数值</div>
+    </section>
+  </main>
   <script src="/assets/app.js"></script>
 </body>
 </html>

@@ -1,3 +1,283 @@
+:root {
+  --bg: #f4f6f2;
+  --ink: #17211b;
+  --muted: #5f6b63;
+  --panel: #ffffff;
+  --line: #cbd5ce;
+  --good: #2f8f5b;
+  --warn: #c48a21;
+  --bad: #ba3c32;
+  --accent: #235c8f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--bg);
   font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+.cockpit {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 270px minmax(540px, 1fr) 300px;
+  grid-template-rows: 76px minmax(390px, 1fr) 230px;
+  gap: 1px;
+  background: var(--line);
+}
+
+.session-bar,
+.summary-panel,
+.topology-panel,
+.detail-panel,
+.timeline-panel {
+  background: var(--panel);
+}
+
+.session-bar {
+  grid-column: 1 / 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 18px;
+}
+
+.eyebrow {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+h1 {
+  font-size: 20px;
+}
+
+h2 {
+  font-size: 15px;
+}
+
+.actions,
+.zoom-controls,
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.actions a,
+.suspicion,
+.lane,
+.zoom-controls button,
+.window-controls select,
+.window-controls input {
+  border: 1px solid var(--line);
+  background: #f9faf8;
+  color: var(--ink);
+  padding: 8px 10px;
+  border-radius: 6px;
+  text-decoration: none;
+}
+
+.suspicion,
+.lane,
+.zoom-controls button,
+.window-controls select {
+  cursor: pointer;
+}
+
+.summary-panel,
+.detail-panel,
+.timeline-panel,
+.topology-panel {
+  padding: 14px;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.panel-header.compact {
+  margin-bottom: 12px;
+}
+
+.timeline-header {
+  margin-bottom: 12px;
+}
+
+.stack {
+  display: grid;
+  gap: 10px;
+}
+
+.event-block {
+  margin-top: 24px;
+}
+
+.suspicion,
+.event-item,
+.empty-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+.suspicion strong,
+.event-item strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.suspicion span,
+.event-item span,
+.empty-item {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.topology-canvas {
+  height: calc(100% - 36px);
+  min-height: 340px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(0deg, rgba(23, 33, 27, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 33, 27, 0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.topology-svg {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  user-select: none;
+}
+
+.edge {
+  stroke: var(--line);
+  stroke-width: 3;
+}
+
+.edge.selected {
+  stroke: var(--accent);
+  stroke-width: 5;
+}
+
+.node circle {
+  fill: var(--panel);
+  stroke: var(--good);
+  stroke-width: 3;
+}
+
+.node.unknown circle {
+  stroke: var(--warn);
+  stroke-dasharray: 5 4;
+}
+
+.node text,
+.path-label {
+  font-size: 12px;
+  text-anchor: middle;
+  fill: var(--muted);
+}
+
+.node .ttl-label {
+  fill: var(--ink);
+  font-weight: 700;
+}
+
+.path-label.selected {
+  fill: var(--accent);
+  font-weight: 700;
+}
+
+.lanes {
+  display: grid;
+  gap: 8px;
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: 100px repeat(4, minmax(96px, 1fr));
+  align-items: center;
+  width: 100%;
+  text-align: left;
+}
+
+.lane strong {
+  color: var(--ink);
+}
+
+.lane span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lane.selected {
+  border-color: var(--accent);
+  background: #eef6fb;
+}
+
+.readout {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: #f9faf8;
+  color: var(--muted);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+}
+
+@media (max-width: 980px) {
+  .cockpit {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto minmax(360px, 1fr) auto auto;
+  }
+
+  .session-bar,
+  .summary-panel,
+  .topology-panel,
+  .detail-panel,
+  .timeline-panel {
+    grid-column: 1;
+  }
+
+  .session-bar,
+  .timeline-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .lane {
+    grid-template-columns: 1fr 1fr;
+  }
 }
