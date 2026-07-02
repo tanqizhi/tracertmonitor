@@ -147,9 +147,12 @@ mod tests {
         assert!(app.contains("chart-tooltip"));
         assert!(app.contains("hover-target"));
         assert!(app.contains("showChartTooltip"));
+        assert!(app.contains("edgeLatencyLabel"));
+        assert!(app.contains("edge-latency"));
         assert!(styles.contains(".chart-tooltip"));
         assert!(styles.contains(".axis-label"));
         assert!(styles.contains(".hover-target"));
+        assert!(styles.contains(".edge-latency"));
         assert!(css_rule(&styles, "body").contains("overflow-y: auto"));
         assert!(!css_rule(&styles, "body").contains("overflow: hidden"));
         assert!(css_rule(&styles, ".cockpit").contains("height: auto"));

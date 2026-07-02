@@ -256,6 +256,7 @@ function drawPath(svg, path, pathIndex) {
     line.setAttribute("y2", points[i + 1].y);
     line.setAttribute("class", selected ? "edge selected" : "edge");
     svg.appendChild(line);
+    svg.appendChild(edgeLatencyLabel(path, points[i], points[i + 1], selected));
   }
 
   for (const point of points) {
@@ -299,6 +300,57 @@ function drawPath(svg, path, pathIndex) {
   label.setAttribute("class", selected ? "path-label selected" : "path-label");
   label.textContent = `${path.label} ${path.metrics.window_share_pct.toFixed(1)}%`;
   svg.appendChild(label);
+}
+
+function edgeLatencyLabel(path, fromPoint, toPoint, selected) {
+  const latency = edgeLatency(path, fromPoint.hop, toPoint.hop);
+  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  const severity = edgeLatencySeverity(path, latency);
+  group.setAttribute("class", `edge-latency ${selected ? "selected" : ""} ${latency.estimated ? "estimated" : "measured"} ${severity}`);
+  group.setAttribute("transform", `translate(${((fromPoint.x + toPoint.x) / 2).toFixed(1)} ${((fromPoint.y + toPoint.y) / 2 - 14).toFixed(1)})`);
+
+  const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+  title.textContent = latency.estimated
+    ? "当前为窗口估算，接入真实逐跳探测后显示节点间 RTT"
+    : "当前显示该 hop 的平均 RTT";
+  group.appendChild(title);
+
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("x", -31);
+  rect.setAttribute("y", -13);
+  rect.setAttribute("width", 62);
+  rect.setAttribute("height", 24);
+  rect.setAttribute("rx", 12);
+  group.appendChild(rect);
+
+  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  text.setAttribute("class", "edge-latency-text");
+  text.setAttribute("x", 0);
+  text.setAttribute("y", 4);
+  text.textContent = latency.label;
+  group.appendChild(text);
+  return group;
+}
+
+function edgeLatency(path, fromHop, toHop) {
+  const fromAvg = fromHop.metrics?.avg_ms ?? 0;
+  const toAvg = toHop.metrics?.avg_ms ?? 0;
+  if (toAvg > 0 && fromAvg > 0 && toAvg >= fromAvg) {
+    return { label: `${(toAvg - fromAvg).toFixed(1)}ms`, value: toAvg - fromAvg, estimated: false };
+  }
+  if (toAvg > 0) {
+    return { label: `${toAvg.toFixed(1)}ms`, value: toAvg, estimated: false };
+  }
+  const hopCount = Math.max(1, path.hops.length - 1);
+  const estimate = path.metrics.avg_rtt_ms > 0 ? path.metrics.avg_rtt_ms / hopCount : null;
+  if (estimate === null) return { label: "--ms", value: 0, estimated: true };
+  return { label: `~${estimate.toFixed(1)}ms`, value: estimate, estimated: true };
+}
+
+function edgeLatencySeverity(path, latency) {
+  if (path.metrics.loss_pct >= 12) return "bad";
+  if (latency.value >= 80 || path.metrics.avg_rtt_ms >= 95) return "warn";
+  return "normal";
 }
 
 function renderDetails() {

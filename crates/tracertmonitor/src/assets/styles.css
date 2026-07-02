@@ -279,6 +279,52 @@ h2 {
   stroke-width: 5;
 }
 
+.edge-latency {
+  pointer-events: auto;
+}
+
+.edge-latency rect {
+  fill: rgba(255, 255, 255, 0.92);
+  stroke: rgba(97, 112, 102, 0.34);
+  stroke-width: 1;
+  filter: drop-shadow(0 5px 10px rgba(19, 32, 25, 0.12));
+}
+
+.edge-latency.selected rect {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.edge-latency.warn rect {
+  fill: #fff4df;
+  stroke: var(--warn);
+}
+
+.edge-latency.bad rect {
+  fill: #fff0ed;
+  stroke: var(--bad);
+}
+
+.edge-latency.estimated rect {
+  stroke-dasharray: 4 3;
+}
+
+.edge-latency-text {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-anchor: middle;
+}
+
+.edge-latency.warn .edge-latency-text {
+  fill: #7b5614;
+}
+
+.edge-latency.bad .edge-latency-text {
+  fill: #7a261f;
+}
+
 .node circle {
   fill: var(--panel-strong);
   stroke: var(--good);
