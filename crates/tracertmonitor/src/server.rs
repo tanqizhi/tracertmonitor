@@ -142,9 +142,22 @@ mod tests {
         assert!(index.contains("路径实时监控"));
         assert!(app.contains("renderPathChart"));
         assert!(app.contains("setInterval"));
-        assert!(styles.contains("100vw"));
-        assert!(styles.contains("100vh"));
+        assert!(css_rule(&styles, "body").contains("overflow-y: auto"));
+        assert!(!css_rule(&styles, "body").contains("overflow: hidden"));
+        assert!(css_rule(&styles, ".cockpit").contains("height: auto"));
+        assert!(css_rule(&styles, ".cockpit").contains("min-height: 100vh"));
+        assert!(!css_rule(&styles, ".cockpit").contains("min-height: 0"));
+        assert!(css_rule(&styles, ".timeline-panel").contains("overflow: visible"));
+        assert!(css_rule(&styles, ".lanes").contains("overflow: visible"));
     }
+
+    fn css_rule<'a>(styles: &'a str, selector: &str) -> &'a str {
+        let start = styles.find(&format!("{selector} {{")).unwrap();
+        let body = &styles[start..];
+        let end = body.find('}').unwrap();
+        &body[..end]
+    }
+
     #[test]
     fn route_exports_complete_csv_tables() {
         let session = demo_session();
