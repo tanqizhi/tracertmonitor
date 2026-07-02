@@ -1,4 +1,10 @@
-const LIVE_INTERVAL_MS = 2500;
+const DEFAULT_PACKET_INTERVAL_MS = 2500;
+const TARGET_PRESETS = [
+  { label: "百度", value: "baidu.com" },
+  { label: "阿里 DNS", value: "223.5.5.5" },
+  { label: "天翼云", value: "www.ctyun.cn" },
+  { label: "湖南电信", value: "hn.189.cn" },
+];
 const MAX_LIVE_AGE_MS = 45 * 60 * 1000;
 const CHART_WIDTH = 520;
 const CHART_HEIGHT = 168;
@@ -21,6 +27,8 @@ const state = {
   dragStart: null,
   liveCursor: 0,
   liveTimer: null,
+  targetInput: "",
+  packetIntervalMs: DEFAULT_PACKET_INTERVAL_MS,
 };
 
 async function boot() {
@@ -30,17 +38,93 @@ async function boot() {
   state.liveObservations = state.baseObservations.map((observation) => ({ ...observation }));
   state.templatesByPath = groupObservationsByPath(state.baseObservations);
   state.selectedPathId = state.session.paths[0]?.id ?? null;
+  state.targetInput = state.session.target.input;
   seedCustomWindowInputs();
+  setupMonitorControls();
   render();
   startLiveLoop();
 }
 
 function startLiveLoop() {
+  restartLiveLoop();
+}
+
+function restartLiveLoop() {
   if (state.liveTimer) clearInterval(state.liveTimer);
   state.liveTimer = setInterval(() => {
     appendLiveSamples();
     render();
-  }, LIVE_INTERVAL_MS);
+  }, state.packetIntervalMs);
+}
+
+function setupMonitorControls() {
+  const targetInput = document.querySelector("#target-input");
+  targetInput.value = state.targetInput;
+  document.querySelector("#target-apply").addEventListener("click", applyTargetInput);
+  targetInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") applyTargetInput();
+  });
+
+  const presetRoot = document.querySelector("#target-presets");
+  presetRoot.innerHTML = "";
+  for (const preset of TARGET_PRESETS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = preset.label;
+    button.title = preset.value;
+    button.dataset.target = preset.value;
+    button.addEventListener("click", () => applyTargetPreset(preset.value));
+    presetRoot.appendChild(button);
+  }
+
+  const frequency = document.querySelector("#packet-frequency");
+  const custom = document.querySelector("#packet-frequency-custom");
+  frequency.value = String(DEFAULT_PACKET_INTERVAL_MS);
+  frequency.addEventListener("change", () => applyPacketFrequency());
+  custom.addEventListener("change", () => applyPacketFrequency());
+  custom.addEventListener("input", () => applyPacketFrequency(false));
+  renderMonitorControls();
+}
+
+function applyTargetInput() {
+  const value = document.querySelector("#target-input").value.trim();
+  if (!value) return;
+  state.targetInput = value;
+  renderMonitorControls();
+  render();
+}
+
+function applyTargetPreset(value) {
+  state.targetInput = value;
+  document.querySelector("#target-input").value = value;
+  renderMonitorControls();
+  render();
+}
+
+function applyPacketFrequency(restart = true) {
+  const frequency = document.querySelector("#packet-frequency");
+  const custom = document.querySelector("#packet-frequency-custom");
+  const customSelected = frequency.value === "custom";
+  custom.hidden = !customSelected;
+  const seconds = customSelected ? Number(custom.value) : Number(frequency.value) / 1000;
+  const safeSeconds = clamp(Number.isFinite(seconds) ? seconds : 2.5, 0.2, 60);
+  state.packetIntervalMs = Math.round(safeSeconds * 1000);
+  if (customSelected && String(safeSeconds) !== custom.value) custom.value = safeSeconds.toString();
+  renderMonitorControls();
+  if (restart) restartLiveLoop();
+}
+
+function renderMonitorControls() {
+  document.querySelectorAll("#target-presets button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.target === state.targetInput);
+  });
+  document.querySelector("#packet-frequency-label").textContent = `当前 ${packetFrequencyText(state.packetIntervalMs)}`;
+  document.querySelector("#live-state").textContent = `实时监测中 · ${packetFrequencyText(state.packetIntervalMs)}`;
+}
+
+function packetFrequencyText(intervalMs) {
+  const seconds = intervalMs / 1000;
+  return `${Number.isInteger(seconds) ? seconds.toFixed(0) : seconds.toFixed(1)} 秒 / 包`;
 }
 
 function appendLiveSamples() {
@@ -78,8 +162,7 @@ function render() {
   if (!state.activePaths.some((path) => path.id === state.selectedPathId)) {
     state.selectedPathId = state.activePaths[0]?.id ?? null;
   }
-  document.querySelector("#target").textContent =
-    `${state.session.target.input} -> ${state.session.target.resolved.join(", ")}`;
+  document.querySelector("#target").textContent = currentTargetLabel();
   document.querySelector("#sample-count").textContent = state.liveObservations.length.toString();
   document.querySelector("#refresh-at").textContent = formatTime(latestObservationTime());
   renderSuspicions();
@@ -87,6 +170,14 @@ function render() {
   renderTopology();
   renderDetails();
   renderLanes();
+}
+
+function currentTargetLabel() {
+  const resolved = state.session.target.resolved.join(", ");
+  if (state.targetInput === state.session.target.input) {
+    return `${state.session.target.input} -> ${resolved}`;
+  }
+  return `${state.targetInput} -> demo baseline ${state.session.target.input} (${resolved})`;
 }
 
 function pathsForActiveWindow() {

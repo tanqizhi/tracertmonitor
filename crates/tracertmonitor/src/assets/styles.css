@@ -44,7 +44,7 @@ body {
   min-width: 0;
   display: grid;
   grid-template-columns: 290px minmax(520px, 1fr) 330px;
-  grid-template-rows: 86px minmax(420px, auto) auto;
+  grid-template-rows: minmax(158px, auto) minmax(420px, auto) auto;
   grid-template-areas:
     "header header header"
     "summary topology detail"
@@ -64,15 +64,106 @@ body {
 .session-bar {
   grid-area: header;
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto auto;
+  grid-template-columns: minmax(250px, 0.9fr) minmax(420px, 1.5fr) auto auto;
   align-items: center;
   gap: 18px;
   padding: 12px 18px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .target-block {
   min-width: 0;
+}
+
+.monitor-controls {
+  display: grid;
+  grid-template-columns: minmax(300px, 1.4fr) minmax(190px, 0.8fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.control-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff, #f6f8f4);
+  box-shadow: 0 10px 24px rgba(19, 32, 25, 0.06);
+}
+
+.control-card label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.control-row input,
+.control-row select,
+.control-row button,
+.preset-sites button {
+  border: 1px solid var(--line);
+  background: #f9faf8;
+  color: var(--ink);
+  padding: 8px 10px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.control-row input,
+.control-row select {
+  min-width: 0;
+  width: 100%;
+}
+
+.control-row button,
+.preset-sites button {
+  cursor: pointer;
+}
+
+.control-row button,
+.preset-sites button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.preset-sites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.preset-sites button {
+  padding: 6px 8px;
+}
+
+.frequency-control .control-row {
+  align-items: stretch;
+}
+
+.frequency-control input {
+  max-width: 88px;
+}
+
+.control-hint {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .eyebrow {
@@ -151,7 +242,7 @@ h2 {
 
 .actions {
   justify-content: flex-end;
-  max-width: 430px;
+  max-width: 360px;
 }
 
 .actions a,
@@ -608,6 +699,10 @@ dd {
   .session-bar {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .monitor-controls {
+    grid-template-columns: 1fr;
   }
 
   .actions {

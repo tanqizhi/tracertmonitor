@@ -14,6 +14,30 @@
         <h1 id="target">Loading...</h1>
         <p class="session-copy">演示模式：浏览器端会持续推进样本，模拟真实链路监测刷新。</p>
       </section>
+      <section class="monitor-controls" aria-label="monitor controls">
+        <div class="control-card target-control">
+          <label for="target-input">测试目标站点</label>
+          <div class="control-row">
+            <input id="target-input" type="text" autocomplete="off" placeholder="输入域名或 IP">
+            <button id="target-apply" type="button">应用</button>
+          </div>
+          <div id="target-presets" class="preset-sites" aria-label="快捷站点"></div>
+        </div>
+        <div class="control-card frequency-control">
+          <label for="packet-frequency">发包频率</label>
+          <div class="control-row">
+            <select id="packet-frequency" aria-label="发包频率">
+              <option value="1000">1 秒 / 包</option>
+              <option value="2500" selected>2.5 秒 / 包</option>
+              <option value="5000">5 秒 / 包</option>
+              <option value="10000">10 秒 / 包</option>
+              <option value="custom">自定义</option>
+            </select>
+            <input id="packet-frequency-custom" type="number" min="0.2" max="60" step="0.1" value="2.5" hidden aria-label="自定义发包频率秒数">
+          </div>
+          <span id="packet-frequency-label" class="control-hint">当前 2.5 秒 / 包</span>
+        </div>
+      </section>
       <section class="status-strip" aria-label="session status">
         <div><span>状态</span><strong id="live-state">实时监测中</strong></div>
         <div><span>样本</span><strong id="sample-count">--</strong></div>

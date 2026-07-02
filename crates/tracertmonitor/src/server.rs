@@ -140,8 +140,17 @@ mod tests {
         let styles = String::from_utf8_lossy(&styles_response.body);
 
         assert!(index.contains("路径实时监控"));
+        assert!(index.contains("target-input"));
+        assert!(index.contains("packet-frequency"));
         assert!(app.contains("renderPathChart"));
         assert!(app.contains("setInterval"));
+        assert!(app.contains("TARGET_PRESETS"));
+        assert!(app.contains("baidu.com"));
+        assert!(app.contains("223.5.5.5"));
+        assert!(app.contains("www.ctyun.cn"));
+        assert!(app.contains("hn.189.cn"));
+        assert!(app.contains("applyTargetPreset"));
+        assert!(app.contains("restartLiveLoop"));
         assert!(app.contains("chart-axis"));
         assert!(app.contains("axis-label"));
         assert!(app.contains("chart-tooltip"));
@@ -150,6 +159,9 @@ mod tests {
         assert!(app.contains("edgeLatencyLabel"));
         assert!(app.contains("edge-latency"));
         assert!(styles.contains(".chart-tooltip"));
+        assert!(styles.contains(".monitor-controls"));
+        assert!(styles.contains(".preset-sites"));
+        assert!(styles.contains(".frequency-control"));
         assert!(styles.contains(".axis-label"));
         assert!(styles.contains(".hover-target"));
         assert!(styles.contains(".edge-latency"));
