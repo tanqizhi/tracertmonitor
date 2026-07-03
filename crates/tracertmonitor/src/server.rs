@@ -142,8 +142,15 @@ mod tests {
         assert!(index.contains("路径实时监控"));
         assert!(index.contains("target-input"));
         assert!(index.contains("packet-frequency"));
+        assert!(index.contains("topology-mode"));
+        assert!(index.contains("按路径"));
+        assert!(index.contains("汇聚拓扑"));
         assert!(app.contains("renderPathChart"));
         assert!(app.contains("setInterval"));
+        assert!(app.contains("topologyMode"));
+        assert!(app.contains("drawMergedTopology"));
+        assert!(app.contains("buildMergedTopology"));
+        assert!(app.contains("setTopologyMode"));
         assert!(app.contains("TARGET_PRESETS"));
         assert!(app.contains("baidu.com"));
         assert!(app.contains("223.5.5.5"));
@@ -162,6 +169,9 @@ mod tests {
         assert!(styles.contains(".monitor-controls"));
         assert!(styles.contains(".preset-sites"));
         assert!(styles.contains(".frequency-control"));
+        assert!(styles.contains(".topology-mode-toggle"));
+        assert!(styles.contains(".merged-node"));
+        assert!(styles.contains(".merged-edge"));
         assert!(styles.contains(".axis-label"));
         assert!(styles.contains(".hover-target"));
         assert!(styles.contains(".edge-latency"));

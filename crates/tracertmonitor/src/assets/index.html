@@ -64,12 +64,18 @@
     </aside>
 
     <section class="topology-panel panel">
-      <div class="panel-header">
+      <div class="panel-header topology-header">
         <h2>全路径拓扑</h2>
-        <div class="zoom-controls">
-          <button id="zoom-in" type="button" title="放大">+</button>
-          <button id="zoom-out" type="button" title="缩小">-</button>
-          <button id="zoom-reset" type="button" title="重置视角">Reset</button>
+        <div class="topology-toolbar">
+          <div id="topology-mode" class="topology-mode-toggle" aria-label="拓扑展示模式">
+            <button type="button" data-topology-mode="paths" aria-pressed="true">按路径</button>
+            <button type="button" data-topology-mode="merged" aria-pressed="false">汇聚拓扑</button>
+          </div>
+          <div class="zoom-controls">
+            <button id="zoom-in" type="button" title="放大">+</button>
+            <button id="zoom-out" type="button" title="缩小">-</button>
+            <button id="zoom-reset" type="button" title="重置视角">Reset</button>
+          </div>
         </div>
       </div>
       <div id="topology" class="topology-canvas"></div>

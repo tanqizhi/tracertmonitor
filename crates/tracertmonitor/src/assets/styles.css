@@ -232,6 +232,7 @@ h2 {
 }
 
 .actions,
+.topology-toolbar,
 .zoom-controls,
 .window-controls {
   display: flex;
@@ -247,6 +248,7 @@ h2 {
 
 .actions a,
 .suspicion,
+.topology-mode-toggle button,
 .zoom-controls button,
 .window-controls select,
 .window-controls input {
@@ -260,6 +262,7 @@ h2 {
 }
 
 .suspicion,
+.topology-mode-toggle button,
 .zoom-controls button,
 .window-controls select {
   cursor: pointer;
@@ -299,6 +302,34 @@ h2 {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
+}
+
+.topology-header {
+  align-items: flex-start;
+}
+
+.topology-toolbar {
+  justify-content: flex-end;
+}
+
+.topology-mode-toggle {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.topology-mode-toggle button {
+  min-height: 34px;
+}
+
+.topology-mode-toggle button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
 }
 
 .panel-header.compact {
@@ -370,6 +401,22 @@ h2 {
   stroke-width: 5;
 }
 
+.merged-edge {
+  stroke: rgba(97, 112, 102, 0.56);
+  stroke-linecap: round;
+  stroke-width: 3;
+}
+
+.merged-edge.shared {
+  stroke: var(--good);
+  stroke-width: 5;
+}
+
+.merged-edge.selected {
+  stroke: var(--accent);
+  stroke-width: 6;
+}
+
 .edge-latency {
   pointer-events: auto;
 }
@@ -422,21 +469,58 @@ h2 {
   stroke-width: 3;
 }
 
+.merged-node circle {
+  fill: var(--panel-strong);
+  filter: drop-shadow(0 8px 14px rgba(19, 32, 25, 0.16));
+}
+
+.merged-node.selected circle {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+
 .node.unknown circle {
   stroke: var(--warn);
   stroke-dasharray: 5 4;
 }
 
 .node text,
-.path-label {
+.path-label,
+.merged-legend,
+.merged-legend-title {
   font-size: 12px;
   text-anchor: middle;
   fill: var(--muted);
 }
 
+.merged-legend,
+.merged-legend-title {
+  text-anchor: start;
+}
+
+.merged-legend {
+  cursor: pointer;
+}
+
+.merged-legend.selected {
+  fill: var(--accent);
+  font-weight: 800;
+}
+
+.merged-legend-title {
+  fill: var(--ink);
+  font-weight: 800;
+}
+
 .node .ttl-label {
   fill: var(--ink);
   font-weight: 700;
+}
+
+.merged-node .node-metadata {
+  fill: var(--muted);
+  font-size: 10px;
 }
 
 .path-label.selected {

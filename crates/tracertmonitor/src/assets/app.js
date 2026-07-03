@@ -17,6 +17,7 @@ const state = {
   templatesByPath: new Map(),
   activePaths: [],
   selectedPathId: null,
+  topologyMode: "paths",
   windowMode: "full",
   customStart: null,
   customEnd: null,
@@ -41,6 +42,7 @@ async function boot() {
   state.targetInput = state.session.target.input;
   seedCustomWindowInputs();
   setupMonitorControls();
+  setupTopologyControls();
   render();
   startLiveLoop();
 }
@@ -84,6 +86,28 @@ function setupMonitorControls() {
   custom.addEventListener("change", () => applyPacketFrequency());
   custom.addEventListener("input", () => applyPacketFrequency(false));
   renderMonitorControls();
+}
+
+function setupTopologyControls() {
+  document.querySelectorAll("[data-topology-mode]").forEach((button) => {
+    button.addEventListener("click", () => setTopologyMode(button.dataset.topologyMode));
+  });
+  renderTopologyModeControls();
+}
+
+function setTopologyMode(mode) {
+  if (!["paths", "merged"].includes(mode) || state.topologyMode === mode) return;
+  state.topologyMode = mode;
+  renderTopologyModeControls();
+  renderTopology();
+}
+
+function renderTopologyModeControls() {
+  document.querySelectorAll("[data-topology-mode]").forEach((button) => {
+    const active = button.dataset.topologyMode === state.topologyMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
 }
 
 function applyTargetInput() {
@@ -331,8 +355,213 @@ function renderTopology() {
     renderTopology();
   });
 
-  state.activePaths.forEach((path, pathIndex) => drawPath(svg, path, pathIndex));
+  if (state.topologyMode === "merged") {
+    drawMergedTopology(svg);
+  } else {
+    state.activePaths.forEach((path, pathIndex) => drawPath(svg, path, pathIndex));
+  }
   root.appendChild(svg);
+}
+
+function drawMergedTopology(svg) {
+  const topology = buildMergedTopology(state.activePaths);
+  drawMergedLegend(svg, topology);
+  for (const edge of topology.edges) drawMergedEdge(svg, edge);
+  for (const node of topology.nodes) drawMergedNode(svg, node);
+}
+
+function buildMergedTopology(paths) {
+  const nodesByKey = new Map();
+  const edgesByKey = new Map();
+
+  for (const path of paths) {
+    const pathNodes = path.hops.map((hop) => {
+      const key = topologyNodeKey(hop);
+      let node = nodesByKey.get(key);
+      if (!node) {
+        node = {
+          key,
+          hop,
+          pathIds: new Set(),
+          pathRefs: [],
+          ttlTotal: 0,
+          ttlCount: 0,
+          layer: hop.ttl,
+          x: 0,
+          y: 0,
+        };
+        nodesByKey.set(key, node);
+      }
+      node.pathIds.add(path.id);
+      if (!node.pathRefs.some((item) => item.id === path.id)) node.pathRefs.push(path);
+      node.ttlTotal += hop.ttl;
+      node.ttlCount += 1;
+      return { node, hop };
+    });
+
+    for (let index = 0; index < pathNodes.length - 1; index += 1) {
+      const from = pathNodes[index];
+      const to = pathNodes[index + 1];
+      if (from.node.key === to.node.key) continue;
+      const edgeKey = `${from.node.key}->${to.node.key}`;
+      let edge = edgesByKey.get(edgeKey);
+      if (!edge) {
+        edge = {
+          from: from.node,
+          to: to.node,
+          pathIds: new Set(),
+          pathRefs: [],
+          segments: [],
+        };
+        edgesByKey.set(edgeKey, edge);
+      }
+      edge.pathIds.add(path.id);
+      if (!edge.pathRefs.some((item) => item.id === path.id)) edge.pathRefs.push(path);
+      edge.segments.push({ path, fromHop: from.hop, toHop: to.hop });
+    }
+  }
+
+  const nodes = [...nodesByKey.values()];
+  for (const node of nodes) {
+    node.layer = Math.max(1, Math.round(node.ttlTotal / Math.max(1, node.ttlCount)));
+  }
+  layoutMergedNodes(nodes);
+  return { nodes, edges: [...edgesByKey.values()], paths };
+}
+
+function layoutMergedNodes(nodes) {
+  const layers = new Map();
+  for (const node of nodes) {
+    if (!layers.has(node.layer)) layers.set(node.layer, []);
+    layers.get(node.layer).push(node);
+  }
+
+  for (const layer of [...layers.keys()].sort((left, right) => left - right)) {
+    const layerNodes = layers.get(layer).sort(compareMergedNodes);
+    const spacing = layerNodes.length <= 1 ? 0 : clamp(300 / (layerNodes.length - 1), 58, 92);
+    layerNodes.forEach((node, index) => {
+      node.x = 96 + (layer - 1) * 145;
+      node.y = 215 + (index - (layerNodes.length - 1) / 2) * spacing;
+    });
+  }
+}
+
+function compareMergedNodes(left, right) {
+  const leftSelected = left.pathIds.has(state.selectedPathId) ? -1 : 0;
+  const rightSelected = right.pathIds.has(state.selectedPathId) ? -1 : 0;
+  if (leftSelected !== rightSelected) return leftSelected - rightSelected;
+  return mergedNodeLabel(left).localeCompare(mergedNodeLabel(right));
+}
+
+function topologyNodeKey(hop) {
+  if (hop.node.kind === "unknown") return `unknown:${hop.ttl}`;
+  return `${hop.node.kind}:${nodeAddress(hop.node)}`;
+}
+
+function drawMergedEdge(svg, edge) {
+  const selected = edge.pathIds.has(state.selectedPathId);
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  line.setAttribute("x1", edge.from.x);
+  line.setAttribute("y1", edge.from.y);
+  line.setAttribute("x2", edge.to.x);
+  line.setAttribute("y2", edge.to.y);
+  line.setAttribute("class", `edge merged-edge ${selected ? "selected" : ""} ${edge.pathIds.size > 1 ? "shared" : "single"}`);
+
+  const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+  title.textContent = edge.pathRefs
+    .map((path) => `${path.label} ${path.metrics.window_share_pct.toFixed(1)}%`)
+    .join(" / ");
+  line.appendChild(title);
+  svg.appendChild(line);
+
+  const segment = edge.segments.find((item) => item.path.id === state.selectedPathId) ?? edge.segments[0];
+  svg.appendChild(edgeLatencyLabel(
+    segment.path,
+    { x: edge.from.x, y: edge.from.y, hop: segment.fromHop },
+    { x: edge.to.x, y: edge.to.y, hop: segment.toHop },
+    selected,
+  ));
+}
+
+function drawMergedNode(svg, node) {
+  const selected = node.pathIds.has(state.selectedPathId);
+  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.setAttribute("class", `node merged-node ${node.hop.node.kind === "unknown" ? "unknown" : ""} ${selected ? "selected" : ""}`);
+  group.addEventListener("click", () => {
+    state.selectedPathId = preferredMergedPathId(node);
+    render();
+  });
+  group.addEventListener("dblclick", () => {
+    state.panX = node.x - 360;
+    state.panY = node.y - 160;
+    state.zoom = 1.4;
+    renderTopology();
+  });
+
+  const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+  title.textContent = node.pathRefs
+    .map((path) => `${path.label} ${path.metrics.window_share_pct.toFixed(1)}%`)
+    .join(" / ");
+  group.appendChild(title);
+
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("cx", node.x);
+  circle.setAttribute("cy", node.y);
+  circle.setAttribute("r", selected ? 26 : Math.min(25, 17 + node.pathIds.size * 2));
+  group.appendChild(circle);
+
+  const ttl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  ttl.setAttribute("x", node.x);
+  ttl.setAttribute("y", node.y + 5);
+  ttl.setAttribute("class", "ttl-label");
+  ttl.textContent = node.hop.ttl;
+  group.appendChild(ttl);
+
+  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  label.setAttribute("x", node.x);
+  label.setAttribute("y", node.y + 45);
+  label.textContent = mergedNodeLabel(node);
+  group.appendChild(label);
+
+  const metadata = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  metadata.setAttribute("x", node.x);
+  metadata.setAttribute("y", node.y + 60);
+  metadata.setAttribute("class", "node-metadata");
+  metadata.textContent = `${node.pathIds.size} 条路径`;
+  group.appendChild(metadata);
+
+  svg.appendChild(group);
+}
+
+function drawMergedLegend(svg, topology) {
+  const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  title.setAttribute("x", 34);
+  title.setAttribute("y", 28);
+  title.setAttribute("class", "merged-legend-title");
+  title.textContent = `汇聚拓扑 · ${topology.paths.length} 条路径`;
+  svg.appendChild(title);
+
+  topology.paths.forEach((path, index) => {
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", 34);
+    label.setAttribute("y", 52 + index * 18);
+    label.setAttribute("class", path.id === state.selectedPathId ? "merged-legend selected" : "merged-legend");
+    label.textContent = `${path.label} ${path.metrics.window_share_pct.toFixed(1)}%`;
+    label.addEventListener("click", () => {
+      state.selectedPathId = path.id;
+      render();
+    });
+    svg.appendChild(label);
+  });
+}
+
+function preferredMergedPathId(node) {
+  const selected = node.pathRefs.find((path) => path.id === state.selectedPathId);
+  return selected?.id ?? node.pathRefs[0]?.id ?? state.selectedPathId;
+}
+
+function mergedNodeLabel(node) {
+  return node.hop.node.kind === "unknown" ? `TTL ${node.hop.ttl} *` : nodeAddress(node.hop.node);
 }
 
 function drawPath(svg, path, pathIndex) {
