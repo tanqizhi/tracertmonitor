@@ -35,28 +35,44 @@ pub fn probe_session_for_target(
     target_input: &str,
     resolved: &[IpAddr],
 ) -> Result<TraceSession, ProbeError> {
-    let target_addr = resolved
-        .first()
-        .copied()
-        .ok_or(ProbeError::TargetNotResolved)?;
-    let output = run_system_traceroute(target_addr)?;
-    let hops = parse_windows_tracert(&output)?;
-    Ok(session_from_hops(target_input, resolved.to_vec(), hops))
+    probe_session_with_runner(target_input, resolved, run_system_traceroute)
+}
+
+fn probe_session_with_runner<F>(
+    target_input: &str,
+    resolved: &[IpAddr],
+    mut runner: F,
+) -> Result<TraceSession, ProbeError>
+where
+    F: FnMut(IpAddr) -> Result<String, ProbeError>,
+{
+    if resolved.is_empty() {
+        return Err(ProbeError::TargetNotResolved);
+    }
+    let mut last_error = ProbeError::TargetNotResolved;
+    for target_addr in resolved.iter().copied() {
+        match runner(target_addr).and_then(|output| parse_windows_tracert(&output)) {
+            Ok(hops) => return Ok(session_from_hops(target_input, resolved.to_vec(), hops)),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
 }
 
 fn run_system_traceroute(target_addr: IpAddr) -> Result<String, ProbeError> {
     let output = system_traceroute_command(target_addr)
         .output()
         .map_err(ProbeError::Command)?;
-    if !output.status.success() {
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    if !output.status.success() && stdout.trim().is_empty() {
         return Err(ProbeError::Status(output.status.to_string()));
     }
-    String::from_utf8(output.stdout).map_err(|_| ProbeError::Utf8)
+    Ok(stdout)
 }
 
 #[cfg(windows)]
 fn system_traceroute_command(target_addr: IpAddr) -> Command {
-    let mut command = Command::new("tracert");
+    let mut command = Command::new("tracert.exe");
     command
         .arg("-d")
         .arg("-h")
@@ -290,6 +306,44 @@ over a maximum of 8 hops:
         assert_eq!(vec![Some(4.0), Some(5.0), Some(4.0)], hops[1].samples_ms);
         assert_eq!(None, hops[2].addr);
         assert_eq!(vec![None, None, None], hops[2].samples_ms);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_traceroute_command_uses_explicit_exe_name() {
+        let command = system_traceroute_command(IpAddr::V4(Ipv4Addr::new(157, 255, 219, 143)));
+
+        assert_eq!("tracert.exe", command.get_program().to_string_lossy());
+    }
+
+    #[test]
+    fn tries_next_resolved_address_when_first_probe_has_no_hops() {
+        let first = IpAddr::V4(Ipv4Addr::new(157, 255, 219, 143));
+        let second = IpAddr::V4(Ipv4Addr::new(124, 237, 177, 164));
+        let output = r#"
+Tracing route to 124.237.177.164 [124.237.177.164]
+over a maximum of 8 hops:
+
+  1    <1 ms    <1 ms    <1 ms  192.168.1.1
+  2     4 ms     5 ms     4 ms  100.72.192.1
+"#;
+        let mut calls = Vec::new();
+
+        let session = probe_session_with_runner("qq.com", &[first, second], |addr| {
+            calls.push(addr);
+            if addr == first {
+                Err(ProbeError::NoHops)
+            } else {
+                Ok(output.to_string())
+            }
+        })
+        .unwrap();
+
+        assert_eq!(vec![first, second], calls);
+        assert_eq!(1, session.paths.len());
+        assert!(session.paths[0].hops.iter().any(|hop| {
+            matches!(hop.node, HopNode::Known { ip, .. } if ip == IpAddr::V4(Ipv4Addr::new(100, 72, 192, 1)))
+        }));
     }
 
     #[test]

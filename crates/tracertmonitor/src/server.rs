@@ -1,7 +1,11 @@
-use crate::demo::demo_session_for_target_with_resolved;
+use crate::analyzer::{aggregate_window, stable_path_id};
 use crate::export::{export_csv_bundle, export_json};
-use crate::model::TraceSession;
+use crate::model::{
+    DiagnosticEvent, DiagnosticEventKind, HopClassification, HopEvidence, HopMetrics, HopNode,
+    PathObservation, Severity, Target, TimeWindow, TraceSession,
+};
 use crate::probe::{ProbeError, probe_session_for_target};
+use chrono::Utc;
 use serde::Deserialize;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
@@ -145,7 +149,7 @@ where
         .clamp(200, 60_000);
     let resolved = resolve_target_addresses(target);
     let updated = probe(target, &resolved)
-        .unwrap_or_else(|_| demo_session_for_target_with_resolved(target, resolved));
+        .unwrap_or_else(|error| probe_failure_session(target, resolved, error));
     *session.lock().expect("session lock poisoned") = updated.clone();
     Ok(text_response(
         200,
@@ -154,6 +158,59 @@ where
     ))
 }
 
+fn probe_failure_session(
+    target_input: &str,
+    resolved: Vec<IpAddr>,
+    error: ProbeError,
+) -> TraceSession {
+    let observed_at = Utc::now();
+    let hops = vec![HopEvidence {
+        ttl: 1,
+        node: HopNode::Unknown,
+        metrics: HopMetrics {
+            sent: 1,
+            recv: 0,
+            loss_pct: 100.0,
+            last_ms: None,
+            avg_ms: 0.0,
+            best_ms: None,
+            worst_ms: None,
+            stddev_ms: 0.0,
+            jitter_ms: None,
+        },
+        classification: HopClassification::Informational,
+    }];
+    let path_id = stable_path_id(&hops);
+    let observations = vec![PathObservation {
+        observed_at,
+        path_id,
+        hops,
+        rtt_ms: None,
+        lost: true,
+        jitter_ms: None,
+    }];
+    let window = TimeWindow {
+        start: observed_at,
+        end: observed_at,
+    };
+    let snapshot = aggregate_window(&observations, window);
+    TraceSession {
+        target: Target {
+            input: target_input.trim().to_string(),
+            resolved,
+        },
+        started_at: observed_at,
+        ended_at: Some(observed_at),
+        paths: snapshot.paths,
+        observations,
+        events: vec![DiagnosticEvent {
+            at: observed_at,
+            severity: Severity::Warning,
+            kind: DiagnosticEventKind::EvidenceInsufficient,
+            message: format!("probe failed: {error}"),
+        }],
+    }
+}
 fn resolve_target_addresses(target: &str) -> Vec<IpAddr> {
     let target = target.trim();
     if let Ok(addr) = target.parse::<IpAddr>() {
@@ -264,6 +321,24 @@ mod tests {
         .unwrap();
 
         assert_eq!(400, response.status);
+    }
+
+    #[test]
+    fn start_route_probe_failure_does_not_return_demo_paths() {
+        let shared = Arc::new(Mutex::new(demo_session()));
+        let response = start_session_with_probe(
+            r#"{"target":"qq.com","packet_interval_ms":1000}"#,
+            &shared,
+            |_target, _resolved| Err(ProbeError::NoHops),
+        )
+        .unwrap();
+
+        assert_eq!(200, response.status);
+        let body = String::from_utf8_lossy(&response.body);
+        assert!(body.contains("qq.com"));
+        assert!(body.contains("probe failed"));
+        assert!(!body.contains("10.0.0.1"));
+        assert!(!body.contains("203.0.113.10"));
     }
 
     #[test]
