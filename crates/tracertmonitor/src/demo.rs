@@ -7,6 +7,10 @@ use chrono::{TimeZone, Utc};
 use std::net::{IpAddr, Ipv4Addr};
 
 pub fn demo_session() -> TraceSession {
+    demo_session_for_target("example.com")
+}
+
+pub fn demo_session_for_target(target_input: &str) -> TraceSession {
     let started_at = Utc.with_ymd_and_hms(2026, 7, 2, 14, 0, 0).unwrap();
     let path_a = vec![
         known(1, 192, 168, 1, 1),
@@ -76,8 +80,8 @@ pub fn demo_session() -> TraceSession {
 
     TraceSession {
         target: Target {
-            input: "example.com".to_string(),
-            resolved: vec![IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))],
+            input: normalized_target(target_input),
+            resolved: demo_resolved_addresses(target_input),
         },
         started_at,
         ended_at: Some(window.end),
@@ -90,6 +94,23 @@ pub fn demo_session() -> TraceSession {
             message: "Path B shows higher latency and packet loss than peer paths".to_string(),
         }],
     }
+}
+
+fn normalized_target(target_input: &str) -> String {
+    let trimmed = target_input.trim();
+    if trimmed.is_empty() {
+        "example.com".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn demo_resolved_addresses(target_input: &str) -> Vec<IpAddr> {
+    target_input
+        .trim()
+        .parse::<IpAddr>()
+        .map(|addr| vec![addr])
+        .unwrap_or_else(|_| vec![IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))])
 }
 
 fn known(ttl: u8, a: u8, b: u8, c: u8, d: u8) -> HopEvidence {
@@ -123,10 +144,23 @@ mod tests {
 
         assert!(session.paths.len() >= 3);
         assert!(session.paths.iter().any(|path| path.suspicion.is_some()));
-        assert!(session
-            .paths
-            .iter()
-            .flat_map(|path| &path.hops)
-            .any(|hop| matches!(hop.node, crate::model::HopNode::Unknown)));
+        assert!(
+            session
+                .paths
+                .iter()
+                .flat_map(|path| &path.hops)
+                .any(|hop| matches!(hop.node, crate::model::HopNode::Unknown))
+        );
+    }
+
+    #[test]
+    fn demo_session_can_be_parameterized_by_target() {
+        let session = demo_session_for_target("223.5.5.5");
+
+        assert_eq!("223.5.5.5", session.target.input);
+        assert_eq!(
+            vec![IpAddr::V4(Ipv4Addr::new(223, 5, 5, 5))],
+            session.target.resolved
+        );
     }
 }

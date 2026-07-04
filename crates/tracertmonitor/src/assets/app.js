@@ -34,17 +34,51 @@ const state = {
 
 async function boot() {
   const response = await fetch("/api/session");
-  state.session = await response.json();
+  installSession(await response.json());
+  setupMonitorControls();
+  setupTopologyControls();
+  render();
+  startLiveLoop();
+}
+
+function installSession(session) {
+  state.session = session;
   state.baseObservations = [...state.session.observations].sort(compareObservedAt);
   state.liveObservations = state.baseObservations.map((observation) => ({ ...observation }));
   state.templatesByPath = groupObservationsByPath(state.baseObservations);
   state.selectedPathId = state.session.paths[0]?.id ?? null;
   state.targetInput = state.session.target.input;
+  state.liveCursor = 0;
   seedCustomWindowInputs();
-  setupMonitorControls();
-  setupTopologyControls();
+}
+
+async function startBackendSession(target) {
+  const response = await fetch("/api/session/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target,
+      packet_interval_ms: state.packetIntervalMs,
+    }),
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "session start failed");
+  }
+  installSession(await response.json());
+  const targetInput = document.querySelector("#target-input");
+  if (targetInput) targetInput.value = state.targetInput;
+  renderMonitorControls();
   render();
-  startLiveLoop();
+  restartLiveLoop();
+}
+
+function requestBackendSession(target) {
+  startBackendSession(target).catch((error) => {
+    console.error(error);
+    const liveState = document.querySelector("#live-state");
+    if (liveState) liveState.textContent = "会话启动失败";
+  });
 }
 
 function startLiveLoop() {
@@ -115,14 +149,14 @@ function applyTargetInput() {
   if (!value) return;
   state.targetInput = value;
   renderMonitorControls();
-  render();
+  requestBackendSession(value);
 }
 
 function applyTargetPreset(value) {
   state.targetInput = value;
   document.querySelector("#target-input").value = value;
   renderMonitorControls();
-  render();
+  requestBackendSession(value);
 }
 
 function applyPacketFrequency(restart = true) {
@@ -135,7 +169,7 @@ function applyPacketFrequency(restart = true) {
   state.packetIntervalMs = Math.round(safeSeconds * 1000);
   if (customSelected && String(safeSeconds) !== custom.value) custom.value = safeSeconds.toString();
   renderMonitorControls();
-  if (restart) restartLiveLoop();
+  if (restart) requestBackendSession(state.targetInput);
 }
 
 function renderMonitorControls() {

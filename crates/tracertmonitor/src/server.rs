@@ -1,7 +1,10 @@
+use crate::demo::demo_session_for_target;
 use crate::export::{export_csv_bundle, export_json};
 use crate::model::TraceSession;
+use serde::Deserialize;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 const INDEX_HTML: &str = include_str!("assets/index.html");
@@ -18,16 +21,18 @@ pub enum ServerError {
     Csv(#[from] csv::Error),
 }
 
+type SharedSession = Arc<Mutex<TraceSession>>;
+
 pub struct CockpitServer {
     listener: TcpListener,
-    session: TraceSession,
+    session: SharedSession,
 }
 
 impl CockpitServer {
     pub fn bind(addr: impl ToSocketAddrs, session: TraceSession) -> Result<Self, ServerError> {
         Ok(Self {
             listener: TcpListener::bind(addr)?,
-            session,
+            session: Arc::new(Mutex::new(session)),
         })
     }
 
@@ -41,6 +46,12 @@ impl CockpitServer {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct StartSessionRequest {
+    target: String,
+    packet_interval_ms: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -84,17 +95,70 @@ pub fn response_for_path(path: &str, session: &TraceSession) -> Result<RouteResp
     }
 }
 
-fn handle_stream(mut stream: TcpStream, session: &TraceSession) -> Result<(), ServerError> {
-    let mut buffer = [0_u8; 2048];
+fn response_for_request(
+    method: &str,
+    path: &str,
+    body: &str,
+    session: &SharedSession,
+) -> Result<RouteResponse, ServerError> {
+    if method == "POST" && path == "/api/session/start" {
+        return start_session(body, session);
+    }
+    let current = current_session(session);
+    response_for_path(path, &current)
+}
+
+fn start_session(body: &str, session: &SharedSession) -> Result<RouteResponse, ServerError> {
+    let request = match serde_json::from_str::<StartSessionRequest>(body) {
+        Ok(request) => request,
+        Err(_) => {
+            return Ok(text_response(
+                400,
+                "text/plain; charset=utf-8",
+                "invalid session request",
+            ));
+        }
+    };
+    let target = request.target.trim();
+    if target.is_empty() {
+        return Ok(text_response(
+            400,
+            "text/plain; charset=utf-8",
+            "target is required",
+        ));
+    }
+    let _packet_interval_ms = request
+        .packet_interval_ms
+        .unwrap_or(2500)
+        .clamp(200, 60_000);
+    let updated = demo_session_for_target(target);
+    *session.lock().expect("session lock poisoned") = updated.clone();
+    Ok(text_response(
+        200,
+        "application/json; charset=utf-8",
+        &export_json(&updated)?,
+    ))
+}
+fn current_session(session: &SharedSession) -> TraceSession {
+
+    session.lock().expect("session lock poisoned").clone()
+}
+fn handle_stream(mut stream: TcpStream, session: &SharedSession) -> Result<(), ServerError> {
+
+    let mut buffer = [0_u8; 16_384];
     let read = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..read]);
-    let path = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("/");
-    let response = response_for_path(path, session)?;
-    let status_text = if response.status == 200 { "OK" } else { "Not Found" };
+    let request_line = request.lines().next().unwrap_or("GET / HTTP/1.1");
+    let method = request_line.split_whitespace().next().unwrap_or("GET");
+    let path = request_line.split_whitespace().nth(1).unwrap_or("/");
+    let body = request.split("\r\n\r\n").nth(1).unwrap_or_default();
+    let response = response_for_request(method, path, body, session)?;
+    let status_text = match response.status {
+        200 => "OK",
+        400 => "Bad Request",
+        404 => "Not Found",
+        _ => "OK",
+    };
     let header = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         response.status,
@@ -130,6 +194,39 @@ mod tests {
     }
 
     #[test]
+    fn start_route_updates_current_session() {
+        let shared = Arc::new(Mutex::new(demo_session()));
+        let response = response_for_request(
+            "POST",
+            "/api/session/start",
+            r#"{"target":"223.5.5.5","packet_interval_ms":1000}"#,
+            &shared,
+        )
+        .unwrap();
+
+        assert_eq!(200, response.status);
+        assert!(String::from_utf8_lossy(&response.body).contains("223.5.5.5"));
+
+        let current = response_for_request("GET", "/api/session", "", &shared).unwrap();
+        let current = String::from_utf8_lossy(&current.body);
+        assert!(current.contains("223.5.5.5"));
+        assert!(!current.contains("example.com"));
+    }
+
+    #[test]
+    fn start_route_rejects_empty_target() {
+        let shared = Arc::new(Mutex::new(demo_session()));
+        let response = response_for_request(
+            "POST",
+            "/api/session/start",
+            r#"{"target":"  ","packet_interval_ms":1000}"#,
+            &shared,
+        )
+        .unwrap();
+
+        assert_eq!(400, response.status);
+    }
+    #[test]
     fn cockpit_assets_expose_realtime_monitoring_layout() {
         let session = demo_session();
         let index_response = response_for_path("/", &session).unwrap();
@@ -143,6 +240,8 @@ mod tests {
         assert!(index.contains("target-input"));
         assert!(index.contains("packet-frequency"));
         assert!(index.contains("topology-mode"));
+        assert!(app.contains("/api/session/start"));
+        assert!(app.contains("startBackendSession"));
         assert!(index.contains("按路径"));
         assert!(index.contains("汇聚拓扑"));
         assert!(app.contains("renderPathChart"));
@@ -151,8 +250,10 @@ mod tests {
         assert!(app.contains("drawMergedTopology"));
         assert!(app.contains("buildMergedTopology"));
         assert!(app.contains("setTopologyMode"));
-        assert!(!js_function_body(&app, "compareMergedNodes", "topologyNodeKey")
-            .contains("selectedPathId"));
+        assert!(
+            !js_function_body(&app, "compareMergedNodes", "topologyNodeKey")
+                .contains("selectedPathId")
+        );
         assert!(app.contains("TARGET_PRESETS"));
         assert!(app.contains("baidu.com"));
         assert!(app.contains("223.5.5.5"));
@@ -204,17 +305,21 @@ mod tests {
     fn route_exports_complete_csv_tables() {
         let session = demo_session();
 
-        assert!(String::from_utf8_lossy(
-            &response_for_path("/export/hop-summary.csv", &session)
-                .unwrap()
-                .body
-        )
-        .contains("NodeKind"));
-        assert!(String::from_utf8_lossy(
-            &response_for_path("/export/observations.csv", &session)
-                .unwrap()
-                .body
-        )
-        .contains("ObservedAt"));
+        assert!(
+            String::from_utf8_lossy(
+                &response_for_path("/export/hop-summary.csv", &session)
+                    .unwrap()
+                    .body
+            )
+            .contains("NodeKind")
+        );
+        assert!(
+            String::from_utf8_lossy(
+                &response_for_path("/export/observations.csv", &session)
+                    .unwrap()
+                    .body
+            )
+            .contains("ObservedAt")
+        );
     }
 }
