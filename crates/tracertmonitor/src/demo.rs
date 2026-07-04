@@ -11,6 +11,13 @@ pub fn demo_session() -> TraceSession {
 }
 
 pub fn demo_session_for_target(target_input: &str) -> TraceSession {
+    demo_session_for_target_with_resolved(target_input, demo_resolved_addresses(target_input))
+}
+
+pub fn demo_session_for_target_with_resolved(
+    target_input: &str,
+    resolved: Vec<IpAddr>,
+) -> TraceSession {
     let started_at = Utc.with_ymd_and_hms(2026, 7, 2, 14, 0, 0).unwrap();
     let path_a = vec![
         known(1, 192, 168, 1, 1),
@@ -81,7 +88,7 @@ pub fn demo_session_for_target(target_input: &str) -> TraceSession {
     TraceSession {
         target: Target {
             input: normalized_target(target_input),
-            resolved: demo_resolved_addresses(target_input),
+            resolved: resolved_or_demo(target_input, resolved),
         },
         started_at,
         ended_at: Some(window.end),
@@ -111,6 +118,14 @@ fn demo_resolved_addresses(target_input: &str) -> Vec<IpAddr> {
         .parse::<IpAddr>()
         .map(|addr| vec![addr])
         .unwrap_or_else(|_| vec![IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))])
+}
+
+fn resolved_or_demo(target_input: &str, resolved: Vec<IpAddr>) -> Vec<IpAddr> {
+    if resolved.is_empty() {
+        demo_resolved_addresses(target_input)
+    } else {
+        resolved
+    }
 }
 
 fn known(ttl: u8, a: u8, b: u8, c: u8, d: u8) -> HopEvidence {

@@ -1,9 +1,9 @@
-use crate::demo::demo_session_for_target;
+use crate::demo::demo_session_for_target_with_resolved;
 use crate::export::{export_csv_bundle, export_json};
 use crate::model::TraceSession;
 use serde::Deserialize;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
@@ -131,7 +131,8 @@ fn start_session(body: &str, session: &SharedSession) -> Result<RouteResponse, S
         .packet_interval_ms
         .unwrap_or(2500)
         .clamp(200, 60_000);
-    let updated = demo_session_for_target(target);
+    let resolved = resolve_target_addresses(target);
+    let updated = demo_session_for_target_with_resolved(target, resolved);
     *session.lock().expect("session lock poisoned") = updated.clone();
     Ok(text_response(
         200,
@@ -139,12 +140,29 @@ fn start_session(body: &str, session: &SharedSession) -> Result<RouteResponse, S
         &export_json(&updated)?,
     ))
 }
-fn current_session(session: &SharedSession) -> TraceSession {
 
+fn resolve_target_addresses(target: &str) -> Vec<IpAddr> {
+    let target = target.trim();
+    if let Ok(addr) = target.parse::<IpAddr>() {
+        return vec![addr];
+    }
+    match (target, 0).to_socket_addrs() {
+        Ok(addrs) => {
+            let mut resolved = Vec::new();
+            for addr in addrs {
+                if !resolved.contains(&addr.ip()) {
+                    resolved.push(addr.ip());
+                }
+            }
+            resolved
+        }
+        Err(_) => Vec::new(),
+    }
+}
+fn current_session(session: &SharedSession) -> TraceSession {
     session.lock().expect("session lock poisoned").clone()
 }
 fn handle_stream(mut stream: TcpStream, session: &SharedSession) -> Result<(), ServerError> {
-
     let mut buffer = [0_u8; 16_384];
     let read = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..read]);
@@ -226,6 +244,15 @@ mod tests {
 
         assert_eq!(400, response.status);
     }
+
+    #[test]
+    fn resolver_preserves_literal_ip_targets() {
+        assert_eq!(
+            vec!["223.5.5.5".parse::<IpAddr>().unwrap()],
+            resolve_target_addresses("223.5.5.5")
+        );
+    }
+
     #[test]
     fn cockpit_assets_expose_realtime_monitoring_layout() {
         let session = demo_session();
