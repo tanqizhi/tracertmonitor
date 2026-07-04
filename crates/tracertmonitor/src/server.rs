@@ -151,6 +151,8 @@ mod tests {
         assert!(app.contains("drawMergedTopology"));
         assert!(app.contains("buildMergedTopology"));
         assert!(app.contains("setTopologyMode"));
+        assert!(!js_function_body(&app, "compareMergedNodes", "topologyNodeKey")
+            .contains("selectedPathId"));
         assert!(app.contains("TARGET_PRESETS"));
         assert!(app.contains("baidu.com"));
         assert!(app.contains("223.5.5.5"));
@@ -188,6 +190,13 @@ mod tests {
         let start = styles.find(&format!("{selector} {{")).unwrap();
         let body = &styles[start..];
         let end = body.find('}').unwrap();
+        &body[..end]
+    }
+
+    fn js_function_body<'a>(source: &'a str, name: &str, next_name: &str) -> &'a str {
+        let start = source.find(&format!("function {name}")).unwrap();
+        let body = &source[start..];
+        let end = body.find(&format!("function {next_name}")).unwrap();
         &body[..end]
     }
 

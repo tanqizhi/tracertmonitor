@@ -447,10 +447,9 @@ function layoutMergedNodes(nodes) {
 }
 
 function compareMergedNodes(left, right) {
-  const leftSelected = left.pathIds.has(state.selectedPathId) ? -1 : 0;
-  const rightSelected = right.pathIds.has(state.selectedPathId) ? -1 : 0;
-  if (leftSelected !== rightSelected) return leftSelected - rightSelected;
-  return mergedNodeLabel(left).localeCompare(mergedNodeLabel(right));
+  const labelOrder = mergedNodeLabel(left).localeCompare(mergedNodeLabel(right));
+  if (labelOrder !== 0) return labelOrder;
+  return left.key.localeCompare(right.key);
 }
 
 function topologyNodeKey(hop) {
