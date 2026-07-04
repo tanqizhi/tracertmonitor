@@ -1,6 +1,7 @@
 use crate::demo::demo_session_for_target_with_resolved;
 use crate::export::{export_csv_bundle, export_json};
 use crate::model::TraceSession;
+use crate::probe::{ProbeError, probe_session_for_target};
 use serde::Deserialize;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
@@ -109,6 +110,17 @@ fn response_for_request(
 }
 
 fn start_session(body: &str, session: &SharedSession) -> Result<RouteResponse, ServerError> {
+    start_session_with_probe(body, session, probe_session_for_target)
+}
+
+fn start_session_with_probe<F>(
+    body: &str,
+    session: &SharedSession,
+    probe: F,
+) -> Result<RouteResponse, ServerError>
+where
+    F: Fn(&str, &[IpAddr]) -> Result<TraceSession, ProbeError>,
+{
     let request = match serde_json::from_str::<StartSessionRequest>(body) {
         Ok(request) => request,
         Err(_) => {
@@ -132,7 +144,8 @@ fn start_session(body: &str, session: &SharedSession) -> Result<RouteResponse, S
         .unwrap_or(2500)
         .clamp(200, 60_000);
     let resolved = resolve_target_addresses(target);
-    let updated = demo_session_for_target_with_resolved(target, resolved);
+    let updated = probe(target, &resolved)
+        .unwrap_or_else(|_| demo_session_for_target_with_resolved(target, resolved));
     *session.lock().expect("session lock poisoned") = updated.clone();
     Ok(text_response(
         200,
@@ -200,7 +213,7 @@ fn text_response(status: u16, content_type: &'static str, body: &str) -> RouteRe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::demo::demo_session;
+    use crate::demo::{demo_session, demo_session_for_target_with_resolved};
 
     #[test]
     fn route_index_returns_html() {
@@ -214,11 +227,15 @@ mod tests {
     #[test]
     fn start_route_updates_current_session() {
         let shared = Arc::new(Mutex::new(demo_session()));
-        let response = response_for_request(
-            "POST",
-            "/api/session/start",
+        let response = start_session_with_probe(
             r#"{"target":"223.5.5.5","packet_interval_ms":1000}"#,
             &shared,
+            |target, resolved| {
+                Ok(demo_session_for_target_with_resolved(
+                    target,
+                    resolved.to_vec(),
+                ))
+            },
         )
         .unwrap();
 
@@ -234,11 +251,15 @@ mod tests {
     #[test]
     fn start_route_rejects_empty_target() {
         let shared = Arc::new(Mutex::new(demo_session()));
-        let response = response_for_request(
-            "POST",
-            "/api/session/start",
+        let response = start_session_with_probe(
             r#"{"target":"  ","packet_interval_ms":1000}"#,
             &shared,
+            |target, resolved| {
+                Ok(demo_session_for_target_with_resolved(
+                    target,
+                    resolved.to_vec(),
+                ))
+            },
         )
         .unwrap();
 
