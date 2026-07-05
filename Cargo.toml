@@ -1,0 +1,82 @@
+[workspace]
+resolver = "2"
+members = [
+  "apps/tracertmonitor",
+  "vendor/trippy/crates/trippy-core",
+  "vendor/trippy/crates/trippy-packet",
+  "vendor/trippy/crates/trippy-privilege",
+  "vendor/trippy/crates/trippy-dns",
+]
+
+[workspace.package]
+version = "0.14.0-dev"
+authors = ["TracertMonitor Contributors"]
+documentation = "https://github.com/tanqizhi/tracertmonitor"
+homepage = "https://github.com/tanqizhi/tracertmonitor"
+repository = "https://github.com/tanqizhi/tracertmonitor"
+readme = "README.md"
+license = "Apache-2.0"
+edition = "2024"
+rust-version = "1.88"
+keywords = ["diagnostics", "traceroute", "ecmp", "monitoring", "network"]
+categories = ["command-line-utilities", "network-programming"]
+
+[workspace.dependencies]
+trippy-core = { version = "0.14.0-dev", path = "vendor/trippy/crates/trippy-core" }
+trippy-privilege = { version = "0.14.0-dev", path = "vendor/trippy/crates/trippy-privilege" }
+trippy-dns = { version = "0.14.0-dev", path = "vendor/trippy/crates/trippy-dns" }
+trippy-packet = { version = "0.14.0-dev", path = "vendor/trippy/crates/trippy-packet" }
+anyhow = "1.0.91"
+arrayvec = { version = "0.7.6", default-features = false }
+bitflags = "2.13.0"
+caps = "0.5.6"
+chrono = { version = "0.4.45", default-features = false }
+crossbeam = "0.8.4"
+csv = "1.4.0"
+derive_more = { version = "2.1.1", default-features = false }
+dns-lookup = "3.0.1"
+futures-concurrency = "7.6.3"
+hex-literal = "1.1.0"
+hickory-resolver = "0.24.4"
+indexmap = { version = "2.14.0", default-features = false }
+itertools = "0.15.0"
+mockall = "0.14.0"
+nix = { version = "0.31.3", default-features = false }
+parking_lot = "0.12.5"
+paste = "1.0.15"
+rand = "0.10.1"
+serde = { version = "1.0.201", default-features = false }
+serde_json = { version = "1.0.117", default-features = false }
+socket2 = "0.6.4"
+test-case = "3.3.1"
+thiserror = "2.0.3"
+tokio = "1.52.2"
+tokio-util = "0.7.18"
+toml = { version = "1.1.2", default-features = false, features = ["serde"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false }
+tun-rs = "2.8.3"
+widestring = "1.2.1"
+windows-sys = "0.61.2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+option_if_let_else = "allow"
+cast_possible_truncation = "allow"
+missing_errors_doc = "allow"
+cast_precision_loss = "allow"
+bool_assert_comparison = "allow"
+missing_const_for_fn = "allow"
+struct_field_names = "allow"
+cognitive_complexity = "allow"
+duration_suboptimal_units = "allow"
+
+[profile.release]
+lto = true
