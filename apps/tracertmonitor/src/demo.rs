@@ -134,6 +134,7 @@ fn known(ttl: u8, a: u8, b: u8, c: u8, d: u8) -> HopEvidence {
         node: HopNode::Known {
             ip: IpAddr::V4(Ipv4Addr::new(a, b, c, d)),
             hostname: None,
+            geoip: None,
         },
         metrics: HopMetrics::default(),
         classification: HopClassification::Normal,

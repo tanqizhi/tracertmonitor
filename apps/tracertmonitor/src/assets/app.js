@@ -1,4 +1,26 @@
-const DEFAULT_PACKET_INTERVAL_MS = 2500;
+const DEFAULT_PACKET_INTERVAL_MS = 1000;
+const DEFAULT_PROTOCOL = "tcp";
+const DEFAULT_PORT = 443;
+const DEFAULT_DIAGNOSTIC_CONFIG = Object.freeze({
+  discovery: Object.freeze({
+    max_ttl: 30,
+    rounds: 3,
+    probes_per_ttl: 3,
+  }),
+  timing: Object.freeze({
+    packet_interval_ms: 1000,
+    window_seconds: 60,
+  }),
+  geoip: Object.freeze({
+    online_enabled: false,
+    preset: "none",
+    url_template: null,
+    local_db_path: null,
+    timeout_ms: 1500,
+    cache_ttl_seconds: 86400,
+    skip_private_or_reserved: true,
+  }),
+});
 const TARGET_PRESETS = [
   { label: "百度", value: "baidu.com" },
   { label: "阿里 DNS", value: "223.5.5.5" },
@@ -9,6 +31,11 @@ const MAX_LIVE_AGE_MS = 45 * 60 * 1000;
 const CHART_WIDTH = 520;
 const CHART_HEIGHT = 168;
 const CHART_PAD = { left: 56, right: 24, top: 22, bottom: 42 };
+const PRECHECK_ORDER = [
+  { kind: "dns", label: "DNS" },
+  { kind: "tcp_port", label: "TCP port" },
+  { kind: "icmp_echo", label: "ICMP echo" },
+];
 
 const state = {
   session: null,
@@ -29,7 +56,10 @@ const state = {
   liveCursor: 0,
   liveTimer: null,
   targetInput: "",
+  protocol: DEFAULT_PROTOCOL,
+  port: DEFAULT_PORT,
   packetIntervalMs: DEFAULT_PACKET_INTERVAL_MS,
+  config: defaultDiagnosticConfig(),
 };
 
 async function boot() {
@@ -48,17 +78,25 @@ function installSession(session) {
   state.templatesByPath = groupObservationsByPath(state.baseObservations);
   state.selectedPathId = state.session.paths[0]?.id ?? null;
   state.targetInput = state.session.target.input;
+  state.protocol = state.session.target.protocol ?? DEFAULT_PROTOCOL;
+  state.port = normalizePort(state.session.target.port ?? DEFAULT_PORT);
+  state.config = normalizeDiagnosticConfig(state.session.config);
+  state.packetIntervalMs = state.config.timing.packet_interval_ms;
   state.liveCursor = 0;
   seedCustomWindowInputs();
 }
 
-async function startBackendSession(target) {
+async function startBackendSession() {
+  state.config = readDiagnosticConfigControls();
+  state.packetIntervalMs = state.config.timing.packet_interval_ms;
   const response = await fetch("/api/session/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      target,
-      packet_interval_ms: state.packetIntervalMs,
+      target: state.targetInput,
+      protocol: state.protocol,
+      port: state.port,
+      config: state.config,
     }),
   });
   if (!response.ok) {
@@ -66,18 +104,16 @@ async function startBackendSession(target) {
     throw new Error(message || "session start failed");
   }
   installSession(await response.json());
-  const targetInput = document.querySelector("#target-input");
-  if (targetInput) targetInput.value = state.targetInput;
+  syncTargetControls();
+  syncConfigControls();
   renderMonitorControls();
   render();
   restartLiveLoop();
 }
-
-function requestBackendSession(target) {
-  startBackendSession(target).catch((error) => {
+function requestBackendSession() {
+  startBackendSession().catch((error) => {
     console.error(error);
-    const liveState = document.querySelector("#live-state");
-    if (liveState) liveState.textContent = "会话启动失败";
+    setControlMessage("会话启动失败");
   });
 }
 
@@ -95,9 +131,16 @@ function restartLiveLoop() {
 
 function setupMonitorControls() {
   const targetInput = document.querySelector("#target-input");
-  targetInput.value = state.targetInput;
+  const protocolSelect = document.querySelector("#protocol-select");
+  const portInput = document.querySelector("#port-input");
+  syncTargetControls();
   document.querySelector("#target-apply").addEventListener("click", applyTargetInput);
   targetInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") applyTargetInput();
+  });
+  protocolSelect.addEventListener("change", applyProtocolInput);
+  portInput.addEventListener("change", applyPortInput);
+  portInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") applyTargetInput();
   });
 
@@ -113,12 +156,7 @@ function setupMonitorControls() {
     presetRoot.appendChild(button);
   }
 
-  const frequency = document.querySelector("#packet-frequency");
-  const custom = document.querySelector("#packet-frequency-custom");
-  frequency.value = String(DEFAULT_PACKET_INTERVAL_MS);
-  frequency.addEventListener("change", () => applyPacketFrequency());
-  custom.addEventListener("change", () => applyPacketFrequency());
-  custom.addEventListener("input", () => applyPacketFrequency(false));
+  setupDiagnosticConfigControls();
   renderMonitorControls();
 }
 
@@ -146,38 +184,253 @@ function renderTopologyModeControls() {
 
 function applyTargetInput() {
   const value = document.querySelector("#target-input").value.trim();
+  const port = readPortInput();
   if (!value) return;
+  if (!port) {
+    setControlMessage("端口必须是 1-65535");
+    return;
+  }
   state.targetInput = value;
+  state.protocol = readProtocolInput();
+  state.port = port;
   renderMonitorControls();
-  requestBackendSession(value);
+  requestBackendSession();
 }
 
 function applyTargetPreset(value) {
   state.targetInput = value;
-  document.querySelector("#target-input").value = value;
+  state.protocol = readProtocolInput();
+  state.port = readPortInput() ?? state.port;
+  syncTargetControls();
   renderMonitorControls();
-  requestBackendSession(value);
+  requestBackendSession();
 }
 
-function applyPacketFrequency(restart = true) {
+function applyProtocolInput() {
+  state.protocol = readProtocolInput();
+  renderMonitorControls();
+  requestBackendSession();
+}
+
+function applyPortInput() {
+  const port = readPortInput();
+  if (!port) {
+    setControlMessage("端口必须是 1-65535");
+    return;
+  }
+  state.port = port;
+  renderMonitorControls();
+  requestBackendSession();
+}
+
+function setupDiagnosticConfigControls() {
+  syncConfigControls();
+  const restartControls = [
+    "#config-max-ttl",
+    "#config-rounds",
+    "#config-probes-per-ttl",
+    "#config-window-seconds",
+    "#geoip-online-enabled",
+    "#geoip-preset",
+    "#geoip-url-template",
+    "#geoip-local-db-path",
+    "#geoip-timeout-ms",
+    "#geoip-cache-ttl-seconds",
+    "#geoip-skip-private",
+  ];
+  restartControls.forEach((selector) => {
+    document.querySelector(selector)?.addEventListener("change", () => applyDiagnosticConfigInput());
+  });
+  document.querySelector("#packet-frequency")?.addEventListener("change", () => applyDiagnosticConfigInput());
+  document.querySelector("#packet-frequency-custom")?.addEventListener("change", () => applyDiagnosticConfigInput());
+  document.querySelector("#packet-frequency-custom")?.addEventListener("input", () => applyDiagnosticConfigInput(false));
+}
+
+function applyDiagnosticConfigInput(restart = true) {
+  state.config = readDiagnosticConfigControls();
+  state.packetIntervalMs = state.config.timing.packet_interval_ms;
+  syncConfigControls();
+  renderMonitorControls();
+  if (restart) {
+    requestBackendSession();
+  } else {
+    restartLiveLoop();
+  }
+}
+
+function defaultDiagnosticConfig() {
+  return {
+    discovery: { ...DEFAULT_DIAGNOSTIC_CONFIG.discovery },
+    timing: { ...DEFAULT_DIAGNOSTIC_CONFIG.timing },
+    geoip: { ...DEFAULT_DIAGNOSTIC_CONFIG.geoip },
+  };
+}
+
+function normalizeDiagnosticConfig(config) {
+  const fallback = defaultDiagnosticConfig();
+  const incoming = config ?? {};
+  return {
+    discovery: {
+      max_ttl: clampInteger(incoming.discovery?.max_ttl, fallback.discovery.max_ttl, 1, 64),
+      rounds: clampInteger(incoming.discovery?.rounds, fallback.discovery.rounds, 1, 20),
+      probes_per_ttl: clampInteger(incoming.discovery?.probes_per_ttl, fallback.discovery.probes_per_ttl, 1, 10),
+    },
+    timing: {
+      packet_interval_ms: clampInteger(incoming.timing?.packet_interval_ms, fallback.timing.packet_interval_ms, 200, 60000),
+      window_seconds: clampInteger(incoming.timing?.window_seconds, fallback.timing.window_seconds, 1, 86400),
+    },
+    geoip: {
+      online_enabled: Boolean(incoming.geoip?.online_enabled ?? fallback.geoip.online_enabled),
+      preset: safeText(incoming.geoip?.preset, fallback.geoip.preset),
+      url_template: nullableText(incoming.geoip?.url_template),
+      local_db_path: nullableText(incoming.geoip?.local_db_path),
+      timeout_ms: clampInteger(incoming.geoip?.timeout_ms, fallback.geoip.timeout_ms, 100, 30000),
+      cache_ttl_seconds: clampInteger(incoming.geoip?.cache_ttl_seconds, fallback.geoip.cache_ttl_seconds, 1, 604800),
+      skip_private_or_reserved: Boolean(incoming.geoip?.skip_private_or_reserved ?? fallback.geoip.skip_private_or_reserved),
+    },
+  };
+}
+
+function readDiagnosticConfigControls() {
+  const current = normalizeDiagnosticConfig(state.config);
+  return normalizeDiagnosticConfig({
+    discovery: {
+      max_ttl: readInteger("#config-max-ttl", current.discovery.max_ttl),
+      rounds: readInteger("#config-rounds", current.discovery.rounds),
+      probes_per_ttl: readInteger("#config-probes-per-ttl", current.discovery.probes_per_ttl),
+    },
+    timing: {
+      packet_interval_ms: readPacketIntervalMs(current.timing.packet_interval_ms),
+      window_seconds: readInteger("#config-window-seconds", current.timing.window_seconds),
+    },
+    geoip: {
+      online_enabled: document.querySelector("#geoip-online-enabled")?.checked ?? current.geoip.online_enabled,
+      preset: document.querySelector("#geoip-preset")?.value ?? current.geoip.preset,
+      url_template: readNullableText("#geoip-url-template"),
+      local_db_path: readNullableText("#geoip-local-db-path"),
+      timeout_ms: readInteger("#geoip-timeout-ms", current.geoip.timeout_ms),
+      cache_ttl_seconds: readInteger("#geoip-cache-ttl-seconds", current.geoip.cache_ttl_seconds),
+      skip_private_or_reserved: document.querySelector("#geoip-skip-private")?.checked ?? current.geoip.skip_private_or_reserved,
+    },
+  });
+}
+
+function syncConfigControls() {
+  const config = normalizeDiagnosticConfig(state.config);
+  setNumberInput("#config-max-ttl", config.discovery.max_ttl);
+  setNumberInput("#config-rounds", config.discovery.rounds);
+  setNumberInput("#config-probes-per-ttl", config.discovery.probes_per_ttl);
+  setNumberInput("#config-window-seconds", config.timing.window_seconds);
+  syncPacketFrequency(config.timing.packet_interval_ms);
+  setCheckbox("#geoip-online-enabled", config.geoip.online_enabled);
+  setSelect("#geoip-preset", config.geoip.preset);
+  setTextInput("#geoip-url-template", config.geoip.url_template ?? "");
+  setTextInput("#geoip-local-db-path", config.geoip.local_db_path ?? "");
+  setNumberInput("#geoip-timeout-ms", config.geoip.timeout_ms);
+  setNumberInput("#geoip-cache-ttl-seconds", config.geoip.cache_ttl_seconds);
+  setCheckbox("#geoip-skip-private", config.geoip.skip_private_or_reserved);
+}
+
+function readPacketIntervalMs(fallback) {
   const frequency = document.querySelector("#packet-frequency");
   const custom = document.querySelector("#packet-frequency-custom");
-  const customSelected = frequency.value === "custom";
-  custom.hidden = !customSelected;
-  const seconds = customSelected ? Number(custom.value) : Number(frequency.value) / 1000;
-  const safeSeconds = clamp(Number.isFinite(seconds) ? seconds : 2.5, 0.2, 60);
-  state.packetIntervalMs = Math.round(safeSeconds * 1000);
-  if (customSelected && String(safeSeconds) !== custom.value) custom.value = safeSeconds.toString();
-  renderMonitorControls();
-  if (restart) requestBackendSession(state.targetInput);
+  const customSelected = frequency?.value === "custom";
+  const seconds = customSelected ? Number(custom?.value) : Number(frequency?.value) / 1000;
+  return Math.round(clamp(Number.isFinite(seconds) ? seconds : fallback / 1000, 0.2, 60) * 1000);
 }
 
+function syncPacketFrequency(intervalMs) {
+  const frequency = document.querySelector("#packet-frequency");
+  const custom = document.querySelector("#packet-frequency-custom");
+  if (!frequency || !custom) return;
+  const preset = [1000, 2500, 5000, 10000].includes(intervalMs) ? String(intervalMs) : "custom";
+  frequency.value = preset;
+  custom.hidden = preset !== "custom";
+  custom.value = (intervalMs / 1000).toString();
+}
+
+function readInteger(selector, fallback) {
+  const value = Number(document.querySelector(selector)?.value);
+  return Number.isInteger(value) ? value : fallback;
+}
+
+function clampInteger(value, fallback, min, max) {
+  const raw = Number(value);
+  if (!Number.isInteger(raw)) return fallback;
+  return clamp(raw, min, max);
+}
+
+function safeText(value, fallback) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function nullableText(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readNullableText(selector) {
+  return nullableText(document.querySelector(selector)?.value ?? "");
+}
+
+function setNumberInput(selector, value) {
+  const input = document.querySelector(selector);
+  if (input && document.activeElement !== input) input.value = value.toString();
+}
+
+function setTextInput(selector, value) {
+  const input = document.querySelector(selector);
+  if (input && document.activeElement !== input) input.value = value;
+}
+
+function setCheckbox(selector, checked) {
+  const input = document.querySelector(selector);
+  if (input) input.checked = checked;
+}
+
+function setSelect(selector, value) {
+  const select = document.querySelector(selector);
+  if (select) select.value = value;
+}
 function renderMonitorControls() {
+  syncTargetControls();
+  syncConfigControls();
   document.querySelectorAll("#target-presets button").forEach((button) => {
     button.classList.toggle("active", button.dataset.target === state.targetInput);
   });
   document.querySelector("#packet-frequency-label").textContent = `当前 ${packetFrequencyText(state.packetIntervalMs)}`;
-  document.querySelector("#live-state").textContent = `实时监测中 · ${packetFrequencyText(state.packetIntervalMs)}`;
+  document.querySelector("#live-state").textContent = `${state.protocol.toUpperCase()} ${state.port} · ${packetFrequencyText(state.packetIntervalMs)}`;
+  renderSessionPhase();
+}
+
+function syncTargetControls() {
+  const targetInput = document.querySelector("#target-input");
+  const protocolSelect = document.querySelector("#protocol-select");
+  const portInput = document.querySelector("#port-input");
+  if (targetInput && document.activeElement !== targetInput) targetInput.value = state.targetInput;
+  if (protocolSelect) protocolSelect.value = state.protocol;
+  if (portInput && document.activeElement !== portInput) portInput.value = state.port.toString();
+}
+
+function readProtocolInput() {
+  const value = document.querySelector("#protocol-select")?.value ?? DEFAULT_PROTOCOL;
+  return ["tcp", "icmp"].includes(value) ? value : DEFAULT_PROTOCOL;
+}
+
+function readPortInput() {
+  const raw = Number(document.querySelector("#port-input")?.value ?? state.port);
+  if (!Number.isInteger(raw) || raw < 1 || raw > 65535) return null;
+  return raw;
+}
+
+function normalizePort(value) {
+  const raw = Number(value);
+  if (!Number.isInteger(raw) || raw < 1 || raw > 65535) return DEFAULT_PORT;
+  return raw;
+}
+
+function setControlMessage(message) {
+  const liveState = document.querySelector("#live-state");
+  if (liveState) liveState.textContent = message;
 }
 
 function packetFrequencyText(intervalMs) {
@@ -223,6 +476,8 @@ function render() {
   document.querySelector("#target").textContent = currentTargetLabel();
   document.querySelector("#sample-count").textContent = state.liveObservations.length.toString();
   document.querySelector("#refresh-at").textContent = formatTime(latestObservationTime());
+  renderSessionPhase();
+  renderPrechecks();
   renderSuspicions();
   renderEvents();
   renderTopology();
@@ -231,11 +486,14 @@ function render() {
 }
 
 function currentTargetLabel() {
-  const resolved = state.session.target.resolved.join(", ");
+  const resolved = state.session.target.resolved.length
+    ? state.session.target.resolved.join(", ")
+    : "未解析";
+  const endpoint = `${state.session.target.protocol?.toUpperCase() ?? state.protocol.toUpperCase()} ${state.session.target.port ?? state.port}`;
   if (state.targetInput === state.session.target.input) {
-    return `${state.session.target.input} -> ${resolved}`;
+    return `${state.session.target.input} (${endpoint}) -> ${resolved}`;
   }
-  return `${state.targetInput} -> demo baseline ${state.session.target.input} (${resolved})`;
+  return `${state.targetInput} (${state.protocol.toUpperCase()} ${state.port}) -> demo baseline ${state.session.target.input} (${resolved})`;
 }
 
 function pathsForActiveWindow() {
@@ -293,6 +551,10 @@ function deriveSuspicion(path, metrics) {
 function currentWindowRange() {
   const observations = state.liveObservations.length ? state.liveObservations : state.baseObservations;
   const times = observations.map((observation) => new Date(observation.observed_at).getTime());
+  if (!times.length) {
+    const now = new Date();
+    return { start: now, end: now };
+  }
   const first = new Date(Math.min(...times));
   const last = new Date(Math.max(...times));
   if (state.windowMode === "1m") return { start: new Date(last.getTime() - 60_000), end: last };
@@ -363,6 +625,71 @@ function renderEvents() {
   }
 }
 
+function renderSessionPhase() {
+  const root = document.querySelector("#session-phase");
+  if (!root) return;
+  const phase = state.session?.phase ?? "idle";
+  root.textContent = phaseText(phase);
+  root.dataset.phase = phase;
+}
+
+function renderPrechecks() {
+  const root = document.querySelector("#precheck-results");
+  if (!root) return;
+  root.innerHTML = "";
+  const checks = new Map((state.session?.prechecks ?? []).map((check) => [check.kind, check]));
+  for (const item of PRECHECK_ORDER) {
+    const check = checks.get(item.kind);
+    const row = document.createElement("div");
+    row.className = `precheck-item ${check?.status ?? "unchecked"}`;
+
+    const title = document.createElement("strong");
+    title.textContent = item.label;
+    row.appendChild(title);
+
+    const status = document.createElement("span");
+    status.className = "precheck-status";
+    status.textContent = precheckStatusText(check?.status ?? "unchecked");
+    row.appendChild(status);
+
+    const detail = document.createElement("small");
+    detail.textContent = precheckDetail(check);
+    row.appendChild(detail);
+
+    root.appendChild(row);
+  }
+}
+
+function phaseText(phase) {
+  const labels = {
+    idle: "空闲",
+    precheck: "预检查",
+    discovering: "路径发现",
+    monitoring: "监测中",
+    failed: "失败",
+    stopped: "已停止",
+  };
+  return labels[phase] ?? phase;
+}
+
+function precheckStatusText(status) {
+  const labels = {
+    reachable: "可达",
+    unreachable: "不可达",
+    blocked_or_filtered: "无回应/被过滤",
+    unchecked: "未检查",
+  };
+  return labels[status] ?? status;
+}
+
+function precheckDetail(check) {
+  if (!check) return "等待后端返回证据";
+  const parts = [];
+  if (check.remote_addr) parts.push(`远端 ${check.remote_addr}`);
+  if (check.rtt_ms !== null && check.rtt_ms !== undefined) parts.push(`RTT ${Number(check.rtt_ms).toFixed(1)}ms`);
+  if (check.detail) parts.push(check.detail);
+  return parts.join(" · ") || "无补充信息";
+}
 function renderTopology() {
   const root = document.querySelector("#topology");
   root.innerHTML = "";
@@ -532,9 +859,13 @@ function drawMergedNode(svg, node) {
   });
 
   const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-  title.textContent = node.pathRefs
-    .map((path) => `${path.label} ${path.metrics.window_share_pct.toFixed(1)}%`)
-    .join(" / ");
+  title.textContent = [
+    mergedNodeLabel(node),
+    geoIpSummary(node.hop.node),
+    node.pathRefs
+      .map((path) => `${path.label} ${path.metrics.window_share_pct.toFixed(1)}%`)
+      .join(" / "),
+  ].filter(Boolean).join("\n");
   group.appendChild(title);
 
   const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -560,7 +891,8 @@ function drawMergedNode(svg, node) {
   metadata.setAttribute("x", node.x);
   metadata.setAttribute("y", node.y + 60);
   metadata.setAttribute("class", "node-metadata");
-  metadata.textContent = `${node.pathIds.size} 条路径`;
+  const geoLabel = geoIpCompact(node.hop.node);
+  metadata.textContent = geoLabel ? `${node.pathIds.size} 条路径 · ${geoLabel}` : `${node.pathIds.size} 条路径`;
   group.appendChild(metadata);
 
   svg.appendChild(group);
@@ -626,6 +958,13 @@ function drawPath(svg, path, pathIndex) {
       renderTopology();
     });
 
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = [
+      point.hop.node.kind === "unknown" ? `TTL ${point.hop.ttl} *` : nodeAddress(point.hop.node),
+      geoIpSummary(point.hop.node),
+    ].filter(Boolean).join("\n");
+    group.appendChild(title);
+
     const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     circle.setAttribute("cx", point.x);
     circle.setAttribute("cy", point.y);
@@ -644,6 +983,16 @@ function drawPath(svg, path, pathIndex) {
     label.setAttribute("y", point.y + 45);
     label.textContent = point.hop.node.kind === "unknown" ? `TTL ${point.hop.ttl} *` : nodeAddress(point.hop.node);
     group.appendChild(label);
+
+    const geoLabel = geoIpCompact(point.hop.node);
+    if (geoLabel) {
+      const metadata = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      metadata.setAttribute("x", point.x);
+      metadata.setAttribute("y", point.y + 60);
+      metadata.setAttribute("class", "node-metadata");
+      metadata.textContent = geoLabel;
+      group.appendChild(metadata);
+    }
     svg.appendChild(group);
   }
 
@@ -721,6 +1070,7 @@ function renderDetails() {
       <dt>平均 RTT</dt><dd>${path.metrics.avg_rtt_ms.toFixed(1)}ms</dd>
       <dt>丢包率</dt><dd>${path.metrics.loss_pct.toFixed(1)}%</dd>
       <dt>Jitter</dt><dd>${path.metrics.avg_jitter_ms.toFixed(1)}ms</dd>
+      <dt>GeoIP</dt><dd>${pathGeoIpDetails(path)}</dd>
       <dt>判断</dt><dd>${path.suspicion ? path.suspicion.reason : "未标记"}</dd>
     </dl>
   `;
@@ -1124,10 +1474,16 @@ function formatWindowEnd(samples) {
 function seedCustomWindowInputs() {
   const observations = state.liveObservations.length ? state.liveObservations : state.baseObservations;
   const times = observations.map((observation) => new Date(observation.observed_at).getTime());
-  const first = new Date(Math.min(...times));
-  const last = new Date(Math.max(...times));
-  state.customStart = toLocalInput(first);
-  state.customEnd = toLocalInput(last);
+  if (!times.length) {
+    const now = new Date();
+    state.customStart = toLocalInput(now);
+    state.customEnd = state.customStart;
+  } else {
+    const first = new Date(Math.min(...times));
+    const last = new Date(Math.max(...times));
+    state.customStart = toLocalInput(first);
+    state.customEnd = toLocalInput(last);
+  }
   document.querySelector("#window-start").value = state.customStart;
   document.querySelector("#window-end").value = state.customEnd;
 }
@@ -1137,6 +1493,55 @@ function toLocalInput(date) {
   return local.toISOString().slice(0, 16);
 }
 
+function pathGeoIpDetails(path) {
+  const lines = path.hops
+    .map((hop) => {
+      const summary = geoIpSummary(hop.node);
+      if (!summary) return null;
+      return `<span class="geoip-line">TTL ${hop.ttl}: ${escapeHtml(summary)}</span>`;
+    })
+    .filter(Boolean);
+  return lines.length ? lines.join("") : "未查询";
+}
+
+function geoIpCompact(node) {
+  if (node.kind === "unknown" || !node.geoip) return "";
+  const parts = [node.geoip.province, node.geoip.city, node.geoip.carrier_or_asn].filter(Boolean);
+  if (parts.length) return parts.slice(0, 2).join(" · ");
+  return geoIpStatusText(node.geoip.status);
+}
+
+function geoIpSummary(node) {
+  if (node.kind === "unknown") return "";
+  if (!node.geoip) return "GeoIP 未查询";
+  const parts = [
+    node.geoip.country_or_region,
+    node.geoip.province,
+    node.geoip.city,
+    node.geoip.carrier_or_asn,
+  ].filter(Boolean);
+  const status = geoIpStatusText(node.geoip.status);
+  return parts.length ? `${parts.join(" · ")} (${status})` : status;
+}
+
+function geoIpStatusText(status) {
+  return {
+    online_hit: "在线命中",
+    online_failed_local_hit: "在线失败，本地命中",
+    local_hit: "本地命中",
+    unknown: "unknown",
+    skipped_private_or_reserved: "跳过内网/保留地址",
+  }[status] ?? "unknown";
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 function nodeAddress(node) {
   if (node.kind === "unknown") return "*";
   return node.hostname || node.ip;
@@ -1188,3 +1593,5 @@ document.querySelector("#window-end").addEventListener("change", (event) => {
 });
 
 boot();
+
+

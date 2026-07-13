@@ -17,29 +17,95 @@
       <section class="monitor-controls" aria-label="monitor controls">
         <div class="control-card target-control">
           <label for="target-input">测试目标站点</label>
-          <div class="control-row">
+          <div class="control-row target-row">
             <input id="target-input" type="text" autocomplete="off" placeholder="输入域名或 IP">
-            <button id="target-apply" type="button">应用</button>
+            <button id="target-apply" type="button">开始诊断</button>
+          </div>
+          <div class="control-row target-options">
+            <div class="inline-field">
+              <label for="protocol-select">协议</label>
+              <select id="protocol-select" aria-label="探测协议">
+                <option value="tcp" selected>TCP</option>
+                <option value="icmp">ICMP</option>
+              </select>
+            </div>
+            <div class="inline-field port-field">
+              <label for="port-input">端口</label>
+              <input id="port-input" type="number" min="1" max="65535" step="1" inputmode="numeric" value="443" aria-label="目标端口">
+            </div>
           </div>
           <div id="target-presets" class="preset-sites" aria-label="快捷站点"></div>
         </div>
-        <div class="control-card frequency-control">
-          <label for="packet-frequency">发包频率</label>
-          <div class="control-row">
-            <select id="packet-frequency" aria-label="发包频率">
-              <option value="1000">1 秒 / 包</option>
-              <option value="2500" selected>2.5 秒 / 包</option>
-              <option value="5000">5 秒 / 包</option>
-              <option value="10000">10 秒 / 包</option>
-              <option value="custom">自定义</option>
-            </select>
-            <input id="packet-frequency-custom" type="number" min="0.2" max="60" step="0.1" value="2.5" hidden aria-label="自定义发包频率秒数">
+        <details class="control-card diagnostic-config">
+          <summary>高级配置</summary>
+          <div class="config-grid">
+            <div class="inline-field">
+              <label for="config-max-ttl">最大 TTL</label>
+              <input id="config-max-ttl" type="number" min="1" max="64" step="1" value="30">
+            </div>
+            <div class="inline-field">
+              <label for="config-rounds">轮数</label>
+              <input id="config-rounds" type="number" min="1" max="20" step="1" value="3">
+            </div>
+            <div class="inline-field">
+              <label for="config-probes-per-ttl">每 TTL 探针</label>
+              <input id="config-probes-per-ttl" type="number" min="1" max="10" step="1" value="3">
+            </div>
+            <div class="inline-field frequency-control">
+              <label for="packet-frequency">发包间隔</label>
+              <div class="control-row">
+                <select id="packet-frequency" aria-label="发包间隔">
+                  <option value="1000" selected>1 秒</option>
+                  <option value="2500">2.5 秒</option>
+                  <option value="5000">5 秒</option>
+                  <option value="10000">10 秒</option>
+                  <option value="custom">自定义</option>
+                </select>
+                <input id="packet-frequency-custom" type="number" min="0.2" max="60" step="0.1" value="1" hidden aria-label="自定义发包间隔秒数">
+              </div>
+              <span id="packet-frequency-label" class="control-hint">当前 1 秒 / 包</span>
+            </div>
+            <div class="inline-field">
+              <label for="config-window-seconds">窗口秒数</label>
+              <input id="config-window-seconds" type="number" min="1" max="86400" step="1" value="60">
+            </div>
+            <div class="inline-field checkbox-field">
+              <label for="geoip-online-enabled">在线 GeoIP</label>
+              <input id="geoip-online-enabled" type="checkbox">
+            </div>
+            <div class="inline-field">
+              <label for="geoip-preset">GeoIP 预设</label>
+              <select id="geoip-preset">
+                <option value="none" selected>none</option>
+                <option value="custom">custom</option>
+              </select>
+            </div>
+            <div class="inline-field wide-field">
+              <label for="geoip-url-template">URL template</label>
+              <input id="geoip-url-template" type="text" autocomplete="off" placeholder="https://example.test/{ip}">
+            </div>
+            <div class="inline-field wide-field">
+              <label for="geoip-local-db-path">本地库路径</label>
+              <input id="geoip-local-db-path" type="text" autocomplete="off" placeholder="GeoIP.mmdb">
+            </div>
+            <div class="inline-field">
+              <label for="geoip-timeout-ms">GeoIP 超时 ms</label>
+              <input id="geoip-timeout-ms" type="number" min="100" max="30000" step="100" value="1500">
+            </div>
+            <div class="inline-field">
+              <label for="geoip-cache-ttl-seconds">缓存秒数</label>
+              <input id="geoip-cache-ttl-seconds" type="number" min="1" max="604800" step="1" value="86400">
+            </div>
+            <div class="inline-field checkbox-field">
+              <label for="geoip-skip-private">跳过私网/保留地址</label>
+              <input id="geoip-skip-private" type="checkbox" checked>
+            </div>
           </div>
-          <span id="packet-frequency-label" class="control-hint">当前 2.5 秒 / 包</span>
-        </div>
+        </details>
       </section>
       <section class="status-strip" aria-label="session status">
         <div><span>状态</span><strong id="live-state">实时监测中</strong></div>
+        <div><span>阶段</span><strong id="session-phase">--</strong></div>
         <div><span>样本</span><strong id="sample-count">--</strong></div>
         <div><span>刷新</span><strong id="refresh-at">--</strong></div>
       </section>
@@ -53,6 +119,12 @@
     </header>
 
     <aside class="summary-panel panel">
+      <section class="precheck-block" aria-label="precheck results">
+        <div class="panel-header compact">
+          <h2>预检查</h2>
+        </div>
+        <div id="precheck-results" class="precheck-list"></div>
+      </section>
       <div class="panel-header compact">
         <h2>疑似问题路径</h2>
       </div>
@@ -112,3 +184,6 @@
   <script src="/assets/app.js"></script>
 </body>
 </html>
+
+
+
